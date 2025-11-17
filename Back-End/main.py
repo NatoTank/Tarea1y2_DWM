@@ -7,6 +7,9 @@ from datetime import datetime, timedelta, timezone, date, time
 from enum import Enum
 import io 
 import random
+import os
+from fastapi_mail import FastMail, MessageSchema, ConnectionConfig # <--- Para Email
+from fastapi.middleware.cors import CORSMiddleware # <--- Para Frontend
 
 # --- LIBRERÍAS DE SEGURIDAD ---
 from passlib.context import CryptContext
@@ -26,13 +29,26 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# --- CONFIGURACIÓN DE EMAIL (MODO SEGURO) ---
+# (Recuerda poner los valores reales en tu terminal)
+conf = ConnectionConfig(
+    MAIL_USERNAME=os.environ.get("MAIL_USERNAME"),
+    MAIL_PASSWORD=os.environ.get("MAIL_PASSWORD"), # La contraseña de app de 16 letras
+    MAIL_FROM=os.environ.get("MAIL_FROM"),        # Tu email de gmail
+    MAIL_PORT=587,
+    MAIL_SERVER="smtp.gmail.com",
+    MAIL_STARTTLS=True,
+    MAIL_SSL_TLS=False,
+    USE_CREDENTIALS=True,
+    VALIDATE_CERTS=True
+)
+
 # --- 1. DEFINICIONES DE ENUMS ---
 class Roles(str, Enum):
     cliente = "cliente"
     administrador = "administrador"
     cocinero = "cocinero"
     repartidor = "repartidor"
-# ... (Todos los otros Enums: EstadoPedido, TipoNotificacion, EstadoSeguimiento, TipoDocumento)
 class EstadoPedido(str, Enum):
     pendiente_de_pago = "pendiente_de_pago"
     pagado = "pagado"
@@ -55,14 +71,13 @@ class TipoDocumento(str, Enum):
 
 
 # --- 2. MODELOS DE BASE DE DATOS (SQLAlchemy) ---
-
+# (Sin cambios)
 pedido_items_tabla = Table('pedido_items', Base.metadata,
     Column('pedido_id', Integer, ForeignKey('pedidos.id'), primary_key=True),
     Column('producto_id', Integer, ForeignKey('productos.id'), primary_key=True),
     Column('cantidad', Integer),
     Column('precio_en_el_momento', Float)
 )
-
 class UsuarioDB(Base):
     __tablename__ = "usuarios"
     id = Column(Integer, primary_key=True, index=True)
@@ -70,37 +85,24 @@ class UsuarioDB(Base):
     hashed_password = Column(String)
     rol = Column(SAEnum(Roles), default=Roles.cliente)
     nombre = Column(String, nullable=True)
-
-    # --- ¡CORRECCIÓN 2! (Campos de datos personales) ---
     direccion = Column(String, nullable=True)
     comuna = Column(String, nullable=True)
     telefono = Column(String, nullable=True)
-    # --------------------------------------------------
-
     recibirPromos = Column(Boolean, default=True)
-    
     pedidos = relationship("PedidoDB", back_populates="dueño")
     carrito = relationship("CarritoDB", back_populates="dueño", uselist=False)
-
 class ProductoDB(Base):
     __tablename__ = "productos"
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String, index=True)
-    
-    # --- ¡CORRECCIÓN 1! (Arreglo anterior) ---
     descripcion = Column(String, nullable=True)
-    # -----------------------------------------
-    
     precio = Column(Float)
     tipo = Column(String)
     stock = Column(Integer)
     activo = Column(Boolean, default=True)
-    
     pedidos = relationship("PedidoDB", secondary=pedido_items_tabla, back_populates="productos")
     promocion_activa = relationship("PromocionDB", back_populates="producto", uselist=False)
     items_carrito = relationship("CarritoItemDB", back_populates="producto")
-
-
 class PedidoDB(Base):
     __tablename__ = "pedidos"
     id = Column(Integer, primary_key=True, index=True)
@@ -108,14 +110,11 @@ class PedidoDB(Base):
     total = Column(Float)
     estado = Column(SAEnum(EstadoPedido), default=EstadoPedido.pendiente_de_pago)
     fecha_creacion = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
     dueño = relationship("UsuarioDB", back_populates="pedidos")
     productos = relationship("ProductoDB", secondary=pedido_items_tabla, back_populates="pedidos")
     seguimiento = relationship("SeguimientoDB", back_populates="pedido", uselist=False)
     notificaciones = relationship("NotificacionDB", back_populates="pedido")
     documento = relationship("DocumentoDB", back_populates="pedido", uselist=False)
-
-# ... (Tablas NotificacionDB, SeguimientoDB, DocumentoDB, PromocionDB) ...
 class NotificacionDB(Base):
     __tablename__ = "notificaciones"
     id = Column(Integer, primary_key=True, index=True)
@@ -154,31 +153,24 @@ class PromocionDB(Base):
     fecha_termino = Column(DateTime(timezone=True))
     activo = Column(Boolean, default=True)
     producto = relationship("ProductoDB", back_populates="promocion_activa")
-
-
-# --- (B-11) Modelos de Carrito ---
 class CarritoDB(Base):
     __tablename__ = "carritos"
     id = Column(Integer, primary_key=True, index=True)
-    usuario_id = Column(Integer, ForeignKey('usuarios.id'), unique=True) # Un carrito por usuario
-    
+    usuario_id = Column(Integer, ForeignKey('usuarios.id'), unique=True) 
     dueño = relationship("UsuarioDB", back_populates="carrito")
     items = relationship("CarritoItemDB", back_populates="carrito", cascade="all, delete-orphan")
-
 class CarritoItemDB(Base):
     __tablename__ = "carrito_items"
     id = Column(Integer, primary_key=True, index=True)
     carrito_id = Column(Integer, ForeignKey('carritos.id'))
     producto_id = Column(Integer, ForeignKey('productos.id'))
     cantidad = Column(Integer)
-    
     carrito = relationship("CarritoDB", back_populates="items")
     producto = relationship("ProductoDB", back_populates="items_carrito")
 
 
 # --- 3. SCHEMAS (DTOs de Pydantic) ---
-
-# (DTOs de Usuario)
+# (Sin cambios)
 class UsuarioCreate(BaseModel):
     email: str
     contraseña: str
@@ -194,8 +186,6 @@ class CambioContraseñaInput(BaseModel):
     nueva_contraseña: str
 class RolUpdate(BaseModel):
     nuevo_rol: Roles
-
-# (DTOs de Producto)
 class ProductoBase(BaseModel):
     nombre: str
     descripcion: Optional[str] = None
@@ -206,13 +196,9 @@ class ProductoCreate(ProductoBase):
     pass
 class ProductoUpdate(BaseModel):
     activo: Optional[bool] = None
-
-# (DTOs de Pedido)
 class PedidoItemInput(BaseModel): 
     producto_id: int
     cantidad: int
-
-# (DTOs de Notificación, Seguimiento, Documento, Dashboard...)
 class EnviarNotificacionInput(BaseModel):
     pedido_id: int
     tipo: TipoNotificacion
@@ -246,36 +232,25 @@ class PromocionCreate(BaseModel):
     producto_id: int
     precio_oferta: float
     fecha_termino: datetime 
-
-# --- (B-11) DTOs de Carrito ---
 class CarritoItemCreate(BaseModel):
     producto_id: int
     cantidad: int
-
-# (Schemas para SALIDA de datos - con from_attributes)
 class ConfigORM:
-    from_attributes = True # <-- ¡CORRECCIÓN 3! (Pydantic v2)
-
+    from_attributes = True 
 class UsuarioSchema(BaseModel):
     id: int
     email: str
     rol: Roles
     nombre: Optional[str] = None
-
-    # --- ¡CORRECCIÓN 2! (Campos de datos personales) ---
     direccion: Optional[str] = None
     comuna: Optional[str] = None
     telefono: Optional[str] = None
-    # --------------------------------------------------
-
     recibirPromos: bool
     class Config(ConfigORM): pass
-
 class ProductoSchema(ProductoBase):
     id: int
     activo: bool
     class Config(ConfigORM): pass
-
 class PedidoSchema(BaseModel):
     id: int
     usuario_id: int
@@ -283,7 +258,6 @@ class PedidoSchema(BaseModel):
     estado: EstadoPedido
     fecha_creacion: datetime
     class Config(ConfigORM): pass
-# ... (Otros Schemas: SeguimientoSchema, NotificacionSchema, DocumentoSchema, PromocionSchema) ...
 class SeguimientoSchema(BaseModel):
     pedido_id: int 
     estado: EstadoSeguimiento
@@ -301,6 +275,8 @@ class DocumentoSchema(BaseModel):
     pedido_id: int
     tipo: TipoDocumento
     total: float
+    rut: Optional[str] = None # <-- AÑADIDO para que se vea en la respuesta
+    razon_social: Optional[str] = None # <-- AÑADIDO para que se vea en la respuesta
     class Config(ConfigORM): pass
 class PromocionSchema(BaseModel):
     id: int
@@ -309,15 +285,12 @@ class PromocionSchema(BaseModel):
     fecha_termino: datetime
     activo: bool
     class Config(ConfigORM): pass
-
-# --- (B-11) Schemas de Carrito ---
 class CarritoItemSchema(BaseModel):
     id: int
     producto_id: int
     cantidad: int
     producto: ProductoSchema 
     class Config(ConfigORM): pass
-
 class CarritoSchema(BaseModel):
     id: int
     usuario_id: int
@@ -327,6 +300,7 @@ class CarritoSchema(BaseModel):
 
 
 # --- 4. CONFIGURACIÓN DE SEGURIDAD ---
+# (Sin cambios)
 SECRET_KEY = "tu-clave-secreta-super-dificil-de-adivinar"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -334,6 +308,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # --- 5. FUNCIONES HELPER DE SEGURIDAD ---
+# (Sin cambios)
 def verificar_contraseña(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 def hashear_contraseña(password: str) -> str:
@@ -346,14 +321,13 @@ def crear_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 # --- 6. FUNCIONES DE AUTENTICACIÓN Y BBDD ---
+# (Sin cambios)
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-
-# (Getters de BBDD)
 def get_usuario_by_email(db: Session, email: str) -> Optional[UsuarioDB]:
     return db.query(UsuarioDB).filter(UsuarioDB.email == email).first()
 def get_usuario_by_id(db: Session, user_id: int) -> Optional[UsuarioDB]:
@@ -366,7 +340,6 @@ def get_notificacion_by_pedido_id(db: Session, pedido_id: int) -> List[Notificac
     return db.query(NotificacionDB).filter(NotificacionDB.pedido_id == pedido_id).all()
 def get_seguimiento_by_pedido_id(db: Session, pedido_id: int) -> Optional[SeguimientoDB]:
     return db.query(SeguimientoDB).filter(SeguimientoDB.pedido_id == pedido_id).first()
-# --- (B-11) Getters de Carrito ---
 def get_carrito_by_user_id(db: Session, usuario_id: int) -> Optional[CarritoDB]:
     return db.query(CarritoDB).filter(CarritoDB.usuario_id == usuario_id).first()
 def get_or_create_carrito(db: Session, usuario_id: int) -> CarritoDB:
@@ -377,15 +350,11 @@ def get_or_create_carrito(db: Session, usuario_id: int) -> CarritoDB:
         db.commit()
         db.refresh(carrito)
     return carrito
-
-# (Función de Autenticación)
 def autenticar_usuario(db: Session, email: str, contraseña: str) -> Optional[UsuarioDB]:
     usuario = get_usuario_by_email(db, email)
     if not usuario or not verificar_contraseña(contraseña, usuario.hashed_password):
         return None
     return usuario
-
-# (Dependencias de Autenticación)
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> UsuarioDB:
     credentials_exception = HTTPException(status_code=401, detail="Credenciales inválidas")
     try:
@@ -406,25 +375,55 @@ async def get_current_repartidor_user(current_user: UsuarioDB = Depends(get_curr
         raise HTTPException(status_code=403, detail="Acción solo para repartidores")
     return current_user
 
-
 # --- 7. CREA LA APP ---
 app = FastAPI(
-    title="Chocomanía API (v6 - CON CARRITO)",
+    title="Chocomanía API (v7 - CON EMAIL)",
     description="API para el sistema de E-commerce Chocomanía"
 )
 
 # ¡ESTA LÍNEA CREA EL ARCHIVO 'chocomania.db' Y LAS TABLAS!
 Base.metadata.create_all(bind=engine)
 
-# --- 8. ENDPOINTS (API) ---
+# --- 8. FUNCIÓN HELPER PARA ENVIAR EMAIL (NUEVA) ---
+async def enviar_email_async(asunto: str, email_destinatario: str, cuerpo_html: str):
+    """
+    Envía un email de forma asíncrona.
+    """
+    message = MessageSchema(
+        subject=asunto,
+        recipients=[email_destinatario],
+        body=cuerpo_html,
+        subtype="html"
+    )
+    
+    fm = FastMail(conf)
+    try:
+        await fm.send_message(message)
+        print(f"Email enviado a {email_destinatario} (Asunto: {asunto})")
+    except Exception as e:
+        # Si las credenciales (paso 2) están mal, verás el error aquí
+        print(f"ERROR AL ENVIAR EMAIL: {e}")
+
+# --- 9. CONFIGURACIÓN DE CORS (NUEVA) ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Permite que tu "Login.html" (file://) se conecte
+    allow_credentials=True,
+    allow_methods=["*"], # Permite POST, GET, etc.
+    allow_headers=["*"], # Permite "Content-Type"
+)
+
+# --- 10. ENDPOINTS (API) ---
 
 @app.get("/")
 def leer_root(): return {"mensaje": "¡Bienvenido a la API de Chocomanía!"}
 
 
 # --- ENDPOINTS DE USUARIO Y AUTENTICACIÓN ---
+
+# ¡MODIFICADO! (Ahora es "async def")
 @app.post("/usuarios/registrar", response_model=UsuarioSchema, status_code=201)
-def registrar_usuario(usuario_input: UsuarioCreate, db: Session = Depends(get_db)):
+async def registrar_usuario(usuario_input: UsuarioCreate, db: Session = Depends(get_db)):
     if get_usuario_by_email(db, usuario_input.email):
         raise HTTPException(status_code=400, detail="El Email esta en uso")
     hashed_password = hashear_contraseña(usuario_input.contraseña)
@@ -437,7 +436,22 @@ def registrar_usuario(usuario_input: UsuarioCreate, db: Session = Depends(get_db
     db.add(nuevo_usuario_db)
     db.commit()
     db.refresh(nuevo_usuario_db)
+    
+    # --- ¡LÓGICA DE EMAIL AÑADIDA! ---
+    cuerpo_html = f"""
+    <h1>¡Bienvenido a Chocomanía, {usuario_input.email}!</h1>
+    <p>Tu cuenta ha sido creada exitosamente.</p>
+    <p>Ya puedes empezar a comprar.</p>
+    """
+    await enviar_email_async(
+        asunto="¡Bienvenido a Chocomanía!",
+        email_destinatario=usuario_input.email,
+        cuerpo_html=cuerpo_html
+    )
+    # --- FIN ---
+
     return nuevo_usuario_db
+
 @app.post("/token", response_model=dict)
 def login_para_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     usuario = autenticar_usuario(db, form_data.username, form_data.password)
@@ -446,9 +460,11 @@ def login_para_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = crear_access_token(data={"sub": usuario.email}, expires_delta=access_token_expires)
     return {"access_token": access_token, "token_type": "bearer"}
+
 @app.get("/usuarios/me", response_model=UsuarioSchema)
 async def leer_mi_perfil(current_user: UsuarioDB = Depends(get_current_user)):
     return current_user
+
 @app.put("/usuarios/me/password")
 def cambiar_contraseña(input: CambioContraseñaInput, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
     if not verificar_contraseña(input.contraseña_actual, current_user.hashed_password):
@@ -456,6 +472,7 @@ def cambiar_contraseña(input: CambioContraseñaInput, current_user: UsuarioDB =
     current_user.hashed_password = hashear_contraseña(input.nueva_contraseña)
     db.commit()
     return {"mensaje": "Contraseña actualizada exitosamente"}
+
 @app.put("/admin/usuarios/{usuario_id}/rol", response_model=UsuarioSchema)
 def asignar_rol(usuario_id: int, rol_input: RolUpdate, admin_user: UsuarioDB = Depends(get_current_admin_user), db: Session = Depends(get_db)):
     usuario = get_usuario_by_id(db, usuario_id)
@@ -476,14 +493,36 @@ def actualizar_datos_personales(datos: DatosPersonalesUpdate, current_user: Usua
     db.refresh(current_user)
     return current_user
 
+# ¡MODIFICADO! (Ahora es "async def")
 @app.put("/usuarios/me/suscripcion", response_model=UsuarioSchema)
-def gestionar_suscripcion(suscripcion: SuscripcionInput, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
-    current_user.recibirPromos = suscripcion.recibirPromos
+async def gestionar_suscripcion(suscripcion: SuscripcionInput, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    
+    # Verificamos si el estado cambió de 'no suscrito' a 'suscrito'
+    era_suscrito = current_user.recibirPromos
+    esta_suscrito = suscripcion.recibirPromos
+
+    current_user.recibirPromos = esta_suscrito
     db.commit()
     db.refresh(current_user)
+
+    # Si el usuario ACABA de suscribirse...
+    if esta_suscrito and not era_suscrito:
+        cuerpo_html = f"""
+        <h1>¡Gracias por suscribirte a Chocomanía! 🍫</h1>
+        <p>Hola {current_user.nombre or current_user.email},</p>
+        <p>Ahora estás en nuestra lista exclusiva. Serás el primero en enterarte de nuestras ofertas.</p>
+        """
+        # ...le enviamos un email de bienvenida
+        await enviar_email_async(
+            asunto="¡Suscripción confirmada! - Chocomanía",
+            email_destinatario=current_user.email,
+            cuerpo_html=cuerpo_html
+        )
+    
     return current_user
 
 # --- ENDPOINTS DE CATÁLOGO (Productos) ---
+# (Sin cambios)
 @app.post("/productos/", response_model=ProductoSchema, status_code=201)
 def crear_producto(producto_input: ProductoCreate, admin_user: UsuarioDB = Depends(get_current_admin_user), db: Session = Depends(get_db)):
     nuevo_producto_db = ProductoDB(**producto_input.model_dump(), activo=True) 
@@ -509,7 +548,9 @@ def actualizar_producto(producto_id: int, producto_update: ProductoUpdate, admin
     db.refresh(producto)
     return producto
 
+
 # --- ENDPOINTS DE PROMOCIONES (B-06) ---
+# (Sin cambios)
 @app.post("/admin/promociones/", response_model=PromocionSchema, status_code=201)
 def crear_promocion(promo_input: PromocionCreate, admin_user: UsuarioDB = Depends(get_current_admin_user), db: Session = Depends(get_db)):
     producto = get_producto_by_id(db, promo_input.producto_id)
@@ -534,214 +575,167 @@ def leer_promociones_activas(db: Session = Depends(get_db)):
     ).all()
     return promociones
 
-# --- (B-11) ENDPOINTS DE CARRITO ---
 
+# --- (B-11) ENDPOINTS DE CARRITO ---
+# (Sin cambios)
 def _calcular_total_carrito(carrito: CarritoDB, db: Session) -> float:
-    """Helper para calcular el total del carrito con promociones"""
     total = 0.0
     for item in carrito.items:
         producto = get_producto_by_id(db, item.producto_id)
         if not producto or not producto.activo:
             continue
-            
-        precio_a_cobrar = producto.precio # Precio normal
-        
-        # Buscamos si hay promo activa
+        precio_a_cobrar = producto.precio 
         promo_activa = db.query(PromocionDB).filter(
             PromocionDB.producto_id == producto.id,
             PromocionDB.activo == True,
             PromocionDB.fecha_termino > datetime.now(timezone.utc)
         ).first()
-        
         if promo_activa:
             precio_a_cobrar = promo_activa.precio_oferta
-        
         total += precio_a_cobrar * item.cantidad
     return total
-
 @app.get("/carrito/me", response_model=CarritoSchema)
 def get_mi_carrito(
     current_user: UsuarioDB = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    (B-11) Obtiene el carrito (con items) del usuario logueado.
-    """
     carrito = get_or_create_carrito(db, current_user.id)
-    
-    # Calculamos el total
     total = _calcular_total_carrito(carrito, db)
-    
-    # Creamos el Schema de respuesta (Ahora funciona gracias a from_attributes=True)
     response_schema = CarritoSchema.from_orm(carrito) 
     response_schema.total_calculado = total
-    
     return response_schema
-
 @app.post("/carrito/items", response_model=CarritoSchema)
 def agregar_item_al_carrito(
     item_input: CarritoItemCreate,
     current_user: UsuarioDB = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    (B-11) Agrega un item al carrito del usuario.
-    """
     carrito = get_or_create_carrito(db, current_user.id)
     producto = get_producto_by_id(db, item_input.producto_id)
-
-    # Validaciones
     if not producto or not producto.activo:
         raise HTTPException(status_code=404, detail="Producto no encontrado o inactivo")
     if producto.stock < item_input.cantidad:
         raise HTTPException(status_code=400, detail="No hay stock suficiente")
-
-    # Chequear si el item ya existe en el carrito
     item_existente = db.query(CarritoItemDB).filter(
         CarritoItemDB.carrito_id == carrito.id,
         CarritoItemDB.producto_id == item_input.producto_id
     ).first()
-
     if item_existente:
-        # Actualiza la cantidad
         item_existente.cantidad += item_input.cantidad
     else:
-        # Crea el nuevo item
         nuevo_item = CarritoItemDB(
             carrito_id=carrito.id,
             producto_id=item_input.producto_id,
             cantidad=item_input.cantidad
         )
         db.add(nuevo_item)
-    
     db.commit()
     db.refresh(carrito)
-
-    # Devolvemos el carrito actualizado (Ahora funciona gracias a from_attributes=True)
     total = _calcular_total_carrito(carrito, db)
     response_schema = CarritoSchema.from_orm(carrito)
     response_schema.total_calculado = total
-    
     return response_schema
-
 @app.delete("/carrito/items/{item_id}", response_model=CarritoSchema)
 def eliminar_item_del_carrito(
     item_id: int,
     current_user: UsuarioDB = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    (B-11 Escenario 2) Elimina un item específico del carrito.
-    """
     carrito = get_carrito_by_user_id(db, current_user.id)
     if not carrito:
         raise HTTPException(status_code=404, detail="Carrito no encontrado")
-
     item_a_eliminar = db.query(CarritoItemDB).filter(
         CarritoItemDB.id == item_id,
         CarritoItemDB.carrito_id == carrito.id
     ).first()
-
     if not item_a_eliminar:
         raise HTTPException(status_code=404, detail="Item no encontrado en el carrito")
-    
     db.delete(item_a_eliminar)
     db.commit()
-    
-    # Devolvemos el carrito actualizado (Ahora funciona gracias a from_attributes=True)
     db.refresh(carrito)
     total = _calcular_total_carrito(carrito, db)
     response_schema = CarritoSchema.from_orm(carrito)
     response_schema.total_calculado = total
-    
     return response_schema
-
 @app.delete("/carrito", response_model=dict)
 def vaciar_carrito(
     current_user: UsuarioDB = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    (B-11 Escenario 1) Vacía TODOS los items del carrito del usuario.
-    """
     carrito = get_carrito_by_user_id(db, current_user.id)
     if not carrito:
         return {"mensaje": "El carrito ya estaba vacío"}
-
-    # Eliminamos todos los items asociados
     db.query(CarritoItemDB).filter(CarritoItemDB.carrito_id == carrito.id).delete()
     db.commit()
-    
     return {"mensaje": "Carrito vaciado exitosamente"}
 
 
-# --- ENDPOINTS DE PAGO Y PEDIDOS (REFACTORIZADO PARA B-11) ---
-
+# --- ENDPOINTS DE PAGO Y PEDIDOS ---
 @app.post("/pedidos/crear-pago-desde-carrito", response_model=dict)
 def crear_pedido_y_pago_desde_carrito(
     current_user: UsuarioDB = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    (REFACTOR de B-08)
-    Crea un Pedido usando los items del CarritoDB del usuario.
-    """
-    
-    # 1. Obtener Carrito
     carrito = get_carrito_by_user_id(db, current_user.id)
     if not carrito or not carrito.items:
-        raise HTTPException(status_code=400, detail="El carrito está vacío") # Gherkin B-08
-
-    # 2. Validar stock y calcular total (usando el helper)
+        raise HTTPException(status_code=400, detail="El carrito está vacío") 
     total_calculado = 0.0
-    
     for item in carrito.items:
         producto = get_producto_by_id(db, item.producto_id)
         if not producto or not producto.activo:
              raise HTTPException(status_code=400, detail=f"Producto {item.producto_id} ya no está disponible")
         if producto.stock < item.cantidad:
              raise HTTPException(status_code=400, detail=f"No hay stock suficiente de {producto.nombre}")
-        
-        # (Aquí usamos la lógica de promos)
         promo_activa = db.query(PromocionDB).filter(PromocionDB.producto_id == producto.id, PromocionDB.activo == True, PromocionDB.fecha_termino > datetime.now(timezone.utc)).first()
         precio_a_cobrar = promo_activa.precio_oferta if promo_activa else producto.precio
-        
         total_calculado += precio_a_cobrar * item.cantidad
-        
-    # 3. Crear el Pedido en BBDD
     nuevo_pedido_db = PedidoDB(
         usuario_id=current_user.id,
         total=total_calculado,
         estado=EstadoPedido.pendiente_de_pago
     )
     db.add(nuevo_pedido_db)
-    
-    # (Aquí faltaría la lógica de la tabla 'pedido_items_tabla' para copiar
-    # los items del carrito al pedido)
-    
-    # 4. Vaciar el carrito
+    # (Falta la lógica de la tabla 'pedido_items_tabla' para copiar items)
     db.query(CarritoItemDB).filter(CarritoItemDB.carrito_id == carrito.id).delete()
-
     db.commit()
     db.refresh(nuevo_pedido_db)
-    
     return {"mensaje": "Pedido creado desde carrito", "redirect_url": f"https://simulador-webpay.cl/pay?token={nuevo_pedido_db.id}"}
 
-
-@app.post("/pedidos/{pedido_id}/solicitar-factura", response_model=dict)
-# ... (Sin cambios)
+# ¡MODIFICADO! (Ahora guarda los datos y responde con DocumentoSchema)
+@app.post("/pedidos/{pedido_id}/solicitar-factura", response_model=DocumentoSchema)
 def solicitar_factura(pedido_id: int, factura_input: FacturaInput, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
     pedido = get_pedido_by_id(db, pedido_id)
     if not pedido or pedido.usuario_id != current_user.id:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    if pedido.estado != EstadoPedido.pendiente_de_pago:
-        raise HTTPException(status_code=400, detail="Solo se puede solicitar factura antes del pago")
-    print(f"Pedido {pedido_id} marcado para Factura con RUT {factura_input.rut}")
-    return {"mensaje": "Datos de facturación recibidos. Se generará al aprobar el pago."}
+    
+    # Busca el documento que se creó en el pago
+    doc = db.query(DocumentoDB).filter(DocumentoDB.pedido_id == pedido_id).first()
+    
+    if not doc:
+        # Si no existe por algún motivo, lo crea
+        doc = DocumentoDB(
+            pedido_id=pedido.id, 
+            total=pedido.total,
+            tipo=TipoDocumento.factura,
+            rut=factura_input.rut,
+            razon_social=factura_input.razon_social
+        )
+        db.add(doc)
+    else:
+        # Si ya existía (como boleta), lo actualiza a factura
+        doc.tipo = TipoDocumento.factura
+        doc.rut = factura_input.rut
+        doc.razon_social = factura_input.razon_social
+            
+    db.commit()
+    db.refresh(doc)
+    print(f"Documento {doc.id} para Pedido {pedido_id} actualizado a FACTURA con RUT {factura_input.rut}")
+    
+    return doc
 
+# ¡MODIFICADO! (Ahora es "async def")
 @app.get("/pagos/confirmacion", response_model=dict)
-# ... (Sin cambios)
-def confirmar_pago_simulado(token: int, simul_status: str, db: Session = Depends(get_db)):
+async def confirmar_pago_simulado(token: int, simul_status: str, db: Session = Depends(get_db)):
     pedido = get_pedido_by_id(db, token)
     if not pedido or pedido.estado != EstadoPedido.pendiente_de_pago:
         raise HTTPException(status_code=404, detail="Pedido no válido o ya procesado")
@@ -760,7 +754,22 @@ def confirmar_pago_simulado(token: int, simul_status: str, db: Session = Depends
         )
         db.add(nuevo_seguimiento)
         
-        enviar_notificacion_interna(db, EnviarNotificacionInput(pedido_id=pedido.id, tipo=TipoNotificacion.pedido_despachado))
+        # --- ¡LÓGICA DE EMAIL AÑADIDA! ---
+        dueño_pedido = get_usuario_by_id(db, pedido.usuario_id)
+        if dueño_pedido:
+            cuerpo_html = f"""
+            <h1>¡Tu pago ha sido aprobado!</h1>
+            <p>Hola {dueño_pedido.nombre or dueño_pedido.email},</p>
+            <p>Tu pago para el pedido <strong>Nº {pedido.id}</strong> por un total de <strong>${pedido.total}</strong> ha sido procesado.</p>
+            <p>Ya estamos preparando tus chocolates.</p>
+            <p>¡Gracias por tu compra!</p>
+            """
+            await enviar_email_async(
+                asunto=f"Confirmación de Pedido Chocomanía Nº {pedido.id}",
+                email_destinatario=dueño_pedido.email,
+                cuerpo_html=cuerpo_html
+            )
+        # --- FIN ---
         
         db.commit()
         return {"mensaje": "Pago aprobado."}
@@ -770,23 +779,79 @@ def confirmar_pago_simulado(token: int, simul_status: str, db: Session = Depends
         return {"mensaje": "Transacción no autorizada"}
 
 @app.put("/pedidos/{pedido_id}/cancelar", response_model=PedidoSchema)
-# ... (Sin cambios)
 def cancelar_pedido(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
     pedido = get_pedido_by_id(db, pedido_id)
     if not pedido or pedido.usuario_id != current_user.id:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     if pedido.estado in [EstadoPedido.despachado, EstadoPedido.entregado]:
         raise HTTPException(status_code=400, detail="No se puede cancelar, el pedido ya fue despachado")
-        
     pedido.estado = EstadoPedido.cancelado
     db.commit()
     print(f"Pedido {pedido.id} marcado como CANCELADO.")
     return pedido
 
+# ¡NUEVO ENDPOINT! (Para enviar Boleta/Factura por email)
+@app.post("/pedidos/{pedido_id}/enviar-documento-email", response_model=dict)
+async def enviar_documento_por_email(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    
+    pedido = get_pedido_by_id(db, pedido_id)
+    if not pedido or pedido.usuario_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+    doc = db.query(DocumentoDB).filter(DocumentoDB.pedido_id == pedido_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento no encontrado para este pedido")
+
+    email_destinatario = current_user.email # Email por defecto
+    asunto = ""
+    cuerpo_html = ""
+
+    if doc.tipo == TipoDocumento.factura:
+        # Lógica para Factura
+        asunto = f"Factura Electrónica por tu Pedido Chocomanía Nº {pedido.id}"
+        cuerpo_html = f"""
+        <h1>Factura Electrónica Chocomanía</h1>
+        <p>Estimado/a {doc.razon_social or current_user.nombre},</p>
+        <p>Adjuntamos (simuladamente) la factura electrónica para tu pedido <strong>Nº {pedido.id}</strong>.</p>
+        <br>
+        <ul>
+            <li><strong>RUT:</strong> {doc.rut}</li>
+            <li><strong>Razón Social:</strong> {doc.razon_social}</li>
+            <li><strong>Total:</strong> ${doc.total}</li>
+        </ul>
+        <br>
+        <p>Este documento es válido para efectos tributarios.</p>
+        <p>Equipo Chocomanía</p>
+        """
+    else:
+        # Lógica para Boleta (default)
+        asunto = f"Boleta Electrónica por tu Pedido Chocomanía Nº {pedido.id}"
+        cuerpo_html = f"""
+        <h1>Boleta Electrónica Chocomanía</h1>
+        <p>Hola {current_user.nombre or current_user.email},</p>
+        <p>Adjuntamos (simuladamente) la boleta electrónica para tu pedido <strong>Nº {pedido.id}</strong>.</p>
+        <br>
+        <ul>
+            <li><strong>Total:</strong> ${doc.total}</li>
+            <li><strong>Fecha:</strong> {doc.fecha.strftime('%Y-%m-%d')}</li>
+        </ul>
+        <br>
+        <p>¡Gracias por tu compra!</p>
+        <p>Equipo Chocomanía</p>
+        """
+
+    # Enviamos el email correspondiente
+    await enviar_email_async(
+        asunto=asunto,
+        email_destinatario=email_destinatario,
+        cuerpo_html=cuerpo_html
+    )
+    
+    return {"mensaje": f"Email de {doc.tipo.value} enviado a {email_destinatario}"}
+
 
 # --- ENDPOINTS DE REPORTES Y DASHBOARD ---
-# ... (generar_reporte_ventas, get_dashboard_ventas, get_dashboard_pedidos_activos) ...
-# (Sin cambios, ya están corregidos)
+# (Sin cambios)
 @app.get("/reportes/ventas")
 def generar_reporte_ventas(fecha_inicio: date, fecha_fin: date, formato: str = "json", admin_user: UsuarioDB = Depends(get_current_admin_user), db: Session = Depends(get_db)):
     estados_de_venta = [EstadoPedido.pagado, EstadoPedido.en_preparacion, EstadoPedido.despachado, EstadoPedido.entregado]
@@ -857,8 +922,8 @@ def get_dashboard_pedidos_activos(fecha: date, admin_user: UsuarioDB = Depends(g
         ))
     return dashboard_list
 
+
 # --- ENDPOINTS DE NOTIFICACIONES ---
-# ... (enviar_notificacion_interna, enviar_notificacion_endpoint, actualizar_notificacion_endpoint) ...
 # (Sin cambios)
 def enviar_notificacion_interna(db: Session, notificacion_input: EnviarNotificacionInput):
     pedido = get_pedido_by_id(db, notificacion_input.pedido_id)
@@ -900,8 +965,9 @@ def actualizar_notificacion_endpoint(pedido_id: int, update_input: ActualizarNot
     print(f"NOTIFICACION ACTUALIZADA (Simulada) Pedido {pedido_id}: {ultima_notificacion.mensaje}")
     return ultima_notificacion
 
+
 # --- ENDPOINTS DE SEGUIMIENTO ---
-# ... (obtener_seguimiento_cliente, confirmar_entrega_repartidor) ...
+# (Sin cambios)
 @app.get("/seguimiento/{pedido_id}", response_model=SeguimientoSchema)
 def obtener_seguimiento_cliente(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
     pedido = get_pedido_by_id(db, pedido_id)
@@ -921,9 +987,7 @@ def obtener_seguimiento_cliente(pedido_id: int, current_user: UsuarioDB = Depend
 def confirmar_entrega_repartidor(pedido_id: int, entrega_input: ConfirmarEntregaInput, repartidor: UsuarioDB = Depends(get_current_repartidor_user), db: Session = Depends(get_db)):
     seguimiento = get_seguimiento_by_pedido_id(db, pedido_id)
     if not seguimiento:
-        # --- ¡CORRECCIÓN ANTERIOR (Sintaxis)! ---
         raise HTTPException(status_code=404, detail="Seguimiento no encontrado")
-        # --------------------------------------
     if seguimiento.estado == EstadoSeguimiento.entregado:
         raise HTTPException(status_code=400, detail="El pedido ya fue marcado como entregado")
     
