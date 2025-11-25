@@ -4,6 +4,7 @@
     <title>Chocomanía - Carrito de Compras</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="config.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -250,203 +251,174 @@
     </div>
 
     <script>
-        // Función para obtener el carrito desde localStorage
-        function getCart() {
-            const cart = localStorage.getItem('chocomaniaCart');
-            return cart ? JSON.parse(cart) : [];
-        }
-
-        // Función para guardar el carrito en localStorage
-        function saveCart(cart) {
-            localStorage.setItem('chocomaniaCart', JSON.stringify(cart));
-        }
-
-        // Elementos del DOM
+        // Referencias
         const cartItemsContainer = document.getElementById('cartItems');
-        const cartTotalElement = document.getElementById('cartTotal');
-        const emptyCartMessage = document.getElementById('emptyCartMessage');
         const cartTableContainer = document.getElementById('cartTableContainer');
         const totalSection = document.getElementById('totalSection');
         const actionButtons = document.getElementById('actionButtons');
-        const clearCartBtn = document.getElementById('clearCartBtn');
-        const confirmOrderBtn = document.getElementById('confirmOrderBtn');
-        const continueShoppingBtn = document.getElementById('continueShoppingBtn');
-        const continueShoppingBtn2 = document.getElementById('continueShoppingBtn2');
+        const emptyCartMessage = document.getElementById('emptyCartMessage');
+        const cartTotalElement = document.getElementById('cartTotal');
 
-        // Función para formatear precios
-        function formatPrice(price) {
-            return price.toLocaleString('es-CL');
+        // --- FUNCIONES DEL CARRITO (GLOBALES) ---
+        
+        // 1. Leer
+        function getLocalCart() { 
+            return JSON.parse(localStorage.getItem('chocomaniaCart')) || []; 
+        }
+        
+        // 2. Guardar
+        function saveLocalCart(cart) { 
+            localStorage.setItem('chocomaniaCart', JSON.stringify(cart)); 
+        }
+        
+        // 3. Formato Precio
+        function formatPrice(price) { 
+            return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(price); 
         }
 
-        // Función para calcular el total del carrito
-        function calculateCartTotal() {
-            const cart = getCart();
-            return cart.reduce((total, item) => total + (item.price * item.quantity), 0);
-        }
-
-        // Función para actualizar la vista del carrito
-        function updateCartView() {
-            const cart = getCart();
-            
-            // Limpiar el contenedor de items
+        // 4. Renderizar (Dibujar)
+        function renderCart() {
+            const cart = getLocalCart();
             cartItemsContainer.innerHTML = '';
-            
-            // Si el carrito está vacío
+
             if (cart.length === 0) {
+                // Vista vacía
                 cartTableContainer.classList.add('d-none');
                 totalSection.classList.add('d-none');
                 actionButtons.classList.add('d-none');
                 emptyCartMessage.classList.remove('d-none');
                 return;
             }
-            
-            // Mostrar elementos del carrito
+
+            // Vista con productos
             cartTableContainer.classList.remove('d-none');
             totalSection.classList.remove('d-none');
             actionButtons.classList.remove('d-none');
             emptyCartMessage.classList.add('d-none');
-            
-            // Agregar cada item al carrito
-            cart.forEach(item => {
+
+            let total = 0;
+            cart.forEach((item, index) => {
                 const subtotal = item.price * item.quantity;
+                total += subtotal;
+                
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>
                         <strong>${item.name}</strong>
-                        ${item.image ? `<div class="text-muted small">Código: ${item.id}</div>` : ''}
+                        <div class="text-muted small">Código: ${item.id}</div>
                     </td>
                     <td class="text-center">
                         <div class="quantity-control">
-                            <button class="quantity-btn decrease-btn" data-id="${item.id}">-</button>
-                            <input type="number" class="quantity-input" value="${item.quantity}" min="1" data-id="${item.id}">
-                            <button class="quantity-btn increase-btn" data-id="${item.id}">+</button>
+                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="updateQty(${index}, -1)">-</button>
+                            <span style="min-width:20px; display:inline-block;">${item.quantity}</span>
+                            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="updateQty(${index}, 1)">+</button>
                         </div>
                     </td>
-                    <td class="text-end">$${formatPrice(item.price)}</td>
-                    <td class="text-end">$${formatPrice(subtotal)}</td>
+                    <td class="text-end">${formatPrice(item.price)}</td>
+                    <td class="text-end">${formatPrice(subtotal)}</td>
                     <td class="text-center">
-                        <button class="remove-btn" data-id="${item.id}">
-                            <i class="fas fa-times"></i>
+                        <button class="btn btn-danger btn-sm" onclick="removeItem(${index})">
+                            <i class="fas fa-trash"></i>
                         </button>
                     </td>
                 `;
                 cartItemsContainer.appendChild(row);
             });
-            
-            // Actualizar el total
-            const total = calculateCartTotal();
             cartTotalElement.textContent = formatPrice(total);
-            
-            // Agregar event listeners a los botones de cantidad y eliminar
-            addEventListeners();
         }
 
-        // Función para agregar event listeners a los botones
-        function addEventListeners() {
-            // Botones de aumentar cantidad
-            document.querySelectorAll('.increase-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const itemId = parseInt(this.getAttribute('data-id'));
-                    const cart = getCart();
-                    const item = cart.find(item => item.id === itemId);
-                    if (item) {
-                        item.quantity++;
-                        saveCart(cart);
-                        updateCartView();
-                    }
-                });
-            });
-            
-            // Botones de disminuir cantidad
-            document.querySelectorAll('.decrease-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const itemId = parseInt(this.getAttribute('data-id'));
-                    const cart = getCart();
-                    const item = cart.find(item => item.id === itemId);
-                    if (item && item.quantity > 1) {
-                        item.quantity--;
-                        saveCart(cart);
-                        updateCartView();
-                    }
-                });
-            });
-            
-            // Inputs de cantidad
-            document.querySelectorAll('.quantity-input').forEach(input => {
-                input.addEventListener('change', function() {
-                    const itemId = parseInt(this.getAttribute('data-id'));
-                    const cart = getCart();
-                    const item = cart.find(item => item.id === itemId);
-                    if (item) {
-                        const newQuantity = parseInt(this.value);
-                        if (newQuantity > 0) {
-                            item.quantity = newQuantity;
-                            saveCart(cart);
-                            updateCartView();
-                        } else {
-                            this.value = item.quantity;
-                        }
-                    }
-                });
-            });
-            
-            // Botones de eliminar (eliminación individual)
-            document.querySelectorAll('.remove-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const itemId = parseInt(this.getAttribute('data-id'));
-                    const cart = getCart();
-                    const newCart = cart.filter(item => item.id !== itemId);
-                    saveCart(newCart);
-                    updateCartView();
-                    alert('Producto eliminado del carrito.');
-                });
-            });
-        }
+        // --- FUNCIONES DE ACCIÓN (WINDOW) ---
+        
+        // Borrar un item (Basurero Rojo)
+        window.removeItem = function(index) {
+            const cart = getLocalCart();
+            cart.splice(index, 1); // Saca el elemento de la lista
+            saveLocalCart(cart);   // Guarda
+            renderCart();          // Redibuja
+        };
 
-        // MODIFICADO: Función para vaciar el carrito - Redirige a VaciadoCarrito.html
-        clearCartBtn.addEventListener('click', function() {
-            const cart = getCart();
-            if (cart.length === 0) {
-                alert('El carrito ya está vacío.');
-                return;
-            }
+        // Cambiar cantidad (+ / -)
+        window.updateQty = function(index, delta) {
+            const cart = getLocalCart();
+            const newQty = cart[index].quantity + delta;
             
-            // Redirigir a la página de vaciado de carrito
-            window.location.href = 'VaciadoCarrito.html';
-        });
+            if (newQty > 0) {
+                cart[index].quantity = newQty;
+                saveLocalCart(cart);
+                renderCart();
+            }
+        };
 
-        // Función para confirmar el pedido
-        confirmOrderBtn.addEventListener('click', function() {
-            const cart = getCart();
-            if (cart.length === 0) {
-                alert('El carrito está vacío. Agrega productos antes de confirmar el pedido.');
-                return;
+        // Borrar TODO (Botón Vaciar Carrito)
+        document.getElementById('clearCartBtn').onclick = async function() {
+            if(confirm("¿Estás seguro de vaciar todo el carrito?")) {
+                // Limpiar Local
+                localStorage.removeItem('chocomaniaCart');
+                localStorage.removeItem('pendingOrder');
+                
+                // Limpiar Backend también (por si acaso)
+                const token = localStorage.getItem('token');
+                if(token) {
+                    try {
+                        await fetch(`${API_URL}/carrito`, { method: 'DELETE', headers: getAuthHeaders() });
+                    } catch(e) { console.log("No se pudo limpiar backend, pero local sí"); }
+                }
+                
+                renderCart();
             }
-            
-            // Guardar el pedido temporalmente para pasarlo a ConfirmacionPedido.html
-            const orderData = {
-                items: [...cart],
-                total: calculateCartTotal(),
-                date: new Date().toLocaleDateString('es-CL'),
-                customer: 'Castellón Prado Salvador'
-            };
+        };
+
+        // --- CONFIRMAR PEDIDO ---
+        document.getElementById('confirmOrderBtn').onclick = async function() {
+            const token = localStorage.getItem('token');
+            if (!token) { 
+                alert("Debes iniciar sesión"); 
+                window.location.href = "Inicio.html"; 
+                return; 
+            }
+
+            const cart = getLocalCart();
+            if(cart.length === 0) return alert("El carrito está vacío");
+
+            // 1. Guardar Datos
+            const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+            const orderData = { items: cart, total: total, customer: "Cliente" };
             localStorage.setItem('pendingOrder', JSON.stringify(orderData));
-            
-            // Redirigir a ConfirmacionPedido.html
-            window.location.href = 'ConfirmacionPedido.html';
-        });
 
-        // Función para continuar comprando
-        continueShoppingBtn.addEventListener('click', function() {
-            window.location.href = 'Catalogo.html';
-        });
+            // 2. UI Loading
+            const btn = this;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Guardando...';
 
-        continueShoppingBtn2.addEventListener('click', function() {
-            window.location.href = 'Catalogo.html';
-        });
+            try {
+                // 3. Sync Backend
+                await fetch(`${API_URL}/carrito`, { method: 'DELETE', headers: getAuthHeaders() });
+                
+                for (const item of cart) {
+                    await fetch(`${API_URL}/carrito/items`, {
+                        method: 'POST',
+                        headers: getAuthHeaders(),
+                        body: JSON.stringify({ producto_id: item.id, cantidad: item.quantity })
+                    });
+                }
 
-        // Inicializar la vista del carrito
-        updateCartView();
+                // 4. Ir a Confirmación
+                window.location.href = 'ConfirmacionPedido.html';
+
+            } catch (error) {
+                console.error(error);
+                alert("Error de conexión");
+                btn.disabled = false;
+                btn.innerHTML = 'Confirmar Pedido';
+            }
+        };
+
+        // Botones Navegación
+        document.getElementById('continueShoppingBtn').onclick = () => window.location.href = "Catalogo.html";
+        document.getElementById('continueShoppingBtn2').onclick = () => window.location.href = "Catalogo.html";
+
+        // Iniciar
+        renderCart();
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
