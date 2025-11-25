@@ -13,6 +13,11 @@ import os
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
 from fastapi.middleware.cors import CORSMiddleware 
 
+# --- ¡AQUÍ ESTÁ EL CAMBIO! (Cargar .env) ---
+from dotenv import load_dotenv
+load_dotenv() # Carga las variables del archivo .env automáticamente
+# -------------------------------------------
+
 # --- LIBRERÍAS DE SEGURIDAD ---
 from passlib.context import CryptContext
 from jose import JWTError, jwt
@@ -32,11 +37,11 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # --- CONFIGURACIÓN DE EMAIL (MODO SEGURO) ---
-# (Recuerda poner los valores reales en tu terminal)
+# (Ahora leerá automáticamente del archivo .env)
 conf = ConnectionConfig(
     MAIL_USERNAME=os.environ.get("MAIL_USERNAME"),
-    MAIL_PASSWORD=os.environ.get("MAIL_PASSWORD"), # La contraseña de app de 16 letras
-    MAIL_FROM=os.environ.get("MAIL_FROM"),        # Tu email de gmail
+    MAIL_PASSWORD=os.environ.get("MAIL_PASSWORD"), 
+    MAIL_FROM=os.environ.get("MAIL_FROM"),        
     MAIL_PORT=587,
     MAIL_SERVER="smtp.gmail.com",
     MAIL_STARTTLS=True,
@@ -270,7 +275,6 @@ class NotificacionSchema(BaseModel):
     mensaje: str
     fecha_envio: datetime
     class Config(ConfigORM): pass
-# ¡SCHEMA CORREGIDO!
 class DocumentoSchema(BaseModel):
     id: int
     pedido_id: int
@@ -1056,3 +1060,12 @@ def confirmar_entrega_repartidor(pedido_id: int, entrega_input: ConfirmarEntrega
     db.commit()
     db.refresh(seguimiento)
     return seguimiento
+# ¡IMPORTANTE! Añadir el endpoint faltante para la integración del frontend
+@app.get("/pedidos/{pedido_id}", response_model=PedidoSchema)
+def obtener_pedido_por_id(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    pedido = get_pedido_by_id(db, pedido_id)
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    if pedido.usuario_id != current_user.id and current_user.rol != Roles.administrador:
+        raise HTTPException(status_code=403, detail="No autorizado")
+    return pedido
