@@ -682,7 +682,7 @@ def vaciar_carrito(
 
 # ¡MODIFICADO! (Con el ARREGLO CRÍTICO)
 @app.post("/pedidos/crear-pago-desde-carrito", response_model=dict)
-def crear_pedido_y_pago_desde_carrito(
+async def crear_pedido_y_pago_desde_carrito(
     current_user: UsuarioDB = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -753,7 +753,12 @@ def crear_pedido_y_pago_desde_carrito(
     db.commit()
     db.refresh(nuevo_pedido_db)
     
-    return {"mensaje": "Pedido creado desde carrito", "redirect_url": f"https://simulador-webpay.cl/pay?token={nuevo_pedido_db.id}"}
+    # Retornar el ID del pedido creado
+    return {
+        "ok": True,
+        "pedido_id": str(nuevo_pedido_db.id),  # ← Asegurar que sea string
+        "redirect_url": f"ConfirmacionPago.html?order_id={nuevo_pedido_db.id}"
+    }
 
 
 # ¡MODIFICADO! (Ahora guarda los datos y responde con DocumentoSchema)
@@ -1060,12 +1065,46 @@ def confirmar_entrega_repartidor(pedido_id: int, entrega_input: ConfirmarEntrega
     db.commit()
     db.refresh(seguimiento)
     return seguimiento
-# ¡IMPORTANTE! Añadir el endpoint faltante para la integración del frontend
-@app.get("/pedidos/{pedido_id}", response_model=PedidoSchema)
-def obtener_pedido_por_id(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
-    pedido = get_pedido_by_id(db, pedido_id)
+@app.get("/pedidos", response_model=List[dict])
+async def obtener_pedidos(current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Obtener todos los pedidos del usuario actual
+    """
+    pedidos = db.query(PedidoDB).filter(PedidoDB.usuario_id == current_user.id).all()
+    
+    # Convertir a diccionario para respuesta
+    result = []
+    for pedido in pedidos:
+        result.append({
+            "id": pedido.id,
+            "usuario_id": pedido.usuario_id,
+            "total": pedido.total,
+            "estado": pedido.estado,
+            "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None,
+            "clientName": current_user.nombre if hasattr(current_user, 'nombre') else "Cliente",
+            "address": current_user.direccion if hasattr(current_user, 'direccion') else "Dirección no especificada",
+            "phone": current_user.telefono if hasattr(current_user, 'telefono') else "No especificado"
+        })
+    
+    return result
+
+@app.get("/pedidos/{pedido_id}", response_model=dict)
+async def obtener_pedido_por_id(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Obtener un pedido específico por ID
+    """
+    pedido = db.query(PedidoDB).filter(
+        PedidoDB.id == pedido_id,
+        PedidoDB.usuario_id == current_user.id
+    ).first()
+    
     if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    if pedido.usuario_id != current_user.id and current_user.rol != Roles.administrador:
-        raise HTTPException(status_code=403, detail="No autorizado")
-    return pedido
+    
+    return {
+        "id": pedido.id,
+        "usuario_id": pedido.usuario_id,
+        "total": pedido.total,
+        "estado": pedido.estado,
+        "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None
+    }
