@@ -832,8 +832,9 @@ async def confirmar_pago_simulado(token: int, simul_status: str, db: Session = D
         raise HTTPException(status_code=404, detail="Pedido no válido o ya procesado")
 
     if simul_status == "aprobado":
-        pedido.estado = EstadoPedido.en_preparacion 
-        print(f"Pedido {pedido.id} ahora en preparación.")
+        # ✅ CAMBIO: Cambiar a "pagado" primero, luego a "en_preparacion"
+        pedido.estado = EstadoPedido.pagado
+        print(f"Pedido {pedido.id} ahora PAGADO.")
         
         # Crea el documento por defecto como BOLETA
         nuevo_doc = DocumentoDB(pedido_id=pedido.id, tipo=TipoDocumento.boleta, total=pedido.total)
@@ -864,11 +865,18 @@ async def confirmar_pago_simulado(token: int, simul_status: str, db: Session = D
         # --- FIN ---
         
         db.commit()
-        return {"mensaje": "Pago aprobado."}
+        return {
+            "mensaje": "Pago aprobado.",
+            "estado": "pagado",
+            "pedido_id": pedido.id
+        }
     else:
         pedido.estado = EstadoPedido.rechazado
         db.commit()
-        return {"mensaje": "Transacción no autorizada"}
+        return {
+            "mensaje": "Transacción no autorizada",
+            "estado": "rechazado"
+        }
 
 @app.put("/pedidos/{pedido_id}/cancelar", response_model=PedidoSchema)
 def cancelar_pedido(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -882,199 +890,367 @@ def cancelar_pedido(pedido_id: int, current_user: UsuarioDB = Depends(get_curren
     print(f"Pedido {pedido.id} marcado como CANCELADO.")
     return pedido
 
-# ¡NUEVO ENDPOINT! (Para enviar Boleta/Factura por email)
-@app.post("/pedidos/{pedido_id}/enviar-documento-email", response_model=dict)
-async def enviar_documento_por_email(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
-    
+# ¡NUEVO ENDPOINT! Marcar pedido como pagado
+@app.put("/pedidos/{pedido_id}/pagar", response_model=dict)
+async def marcar_pedido_pagado(
+    pedido_id: int,
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Marca un pedido como pagado (simula confirmación de pago).
+    """
     pedido = get_pedido_by_id(db, pedido_id)
-    if not pedido or pedido.usuario_id != current_user.id:
+    if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
-        
-    doc = db.query(DocumentoDB).filter(DocumentoDB.pedido_id == pedido_id).first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Documento no encontrado para este pedido")
-
-    email_destinatario = current_user.email # Email por defecto
-    asunto = ""
-    cuerpo_html = ""
-
-    if doc.tipo == TipoDocumento.factura:
-        # Lógica para Factura
-        asunto = f"Factura Electrónica por tu Pedido Chocomanía Nº {pedido.id}"
-        cuerpo_html = f"""
-        <h1>Factura Electrónica Chocomanía</h1>
-        <p>Estimado/a {doc.razon_social or current_user.nombre},</p>
-        <p>Adjuntamos (simuladamente) la factura electrónica para tu pedido <strong>Nº {pedido.id}</strong>.</p>
-        <br>
-        <ul>
-            <li><strong>RUT:</strong> {doc.rut}</li>
-            <li><strong>Razón Social:</strong> {doc.razon_social}</li>
-            <li><strong>Total:</strong> ${doc.total}</li>
-        </ul>
-        <br>
-        <p>Este documento es válido para efectos tributarios.</p>
-        <p>Equipo Chocomanía</p>
-        """
-    else:
-        # Lógica para Boleta (default)
-        asunto = f"Boleta Electrónica por tu Pedido Chocomanía Nº {pedido.id}"
-        cuerpo_html = f"""
-        <h1>Boleta Electrónica Chocomanía</h1>
-        <p>Hola {current_user.nombre or current_user.email},</p>
-        <p>Adjuntamos (simuladamente) la boleta electrónica para tu pedido <strong>Nº {pedido.id}</strong>.</p>
-        <br>
-        <ul>
-            <li><strong>Total:</strong> ${doc.total}</li>
-            <li><strong>Fecha:</strong> {doc.fecha.strftime('%Y-%m-%d')}</li>
-        </ul>
-        <br>
-        <p>¡Gracias por tu compra!</p>
-        <p>Equipo Chocomanía</p>
-        """
-
-    # Enviamos el email correspondiente
+    
+    if pedido.usuario_id != current_user.id:
+        raise HTTPException(status_code=403, detail="No tienes permiso para este pedido")
+    
+    if pedido.estado != EstadoPedido.pendiente_de_pago:
+        # Si ya está pagado, retornar éxito igual
+        return {
+            "mensaje": "Pedido ya procesado",
+            "estado": pedido.estado.value,
+            "pedido_id": pedido.id
+        }
+    
+    # Cambiar estado a PAGADO
+    pedido.estado = EstadoPedido.pagado
+    print(f"Pedido {pedido.id} marcado como PAGADO.")
+    
+    # Crear documento (boleta) si no existe
+    doc_existente = db.query(DocumentoDB).filter(DocumentoDB.pedido_id == pedido_id).first()
+    if not doc_existente:
+        nuevo_doc = DocumentoDB(pedido_id=pedido.id, tipo=TipoDocumento.boleta, total=pedido.total)
+        db.add(nuevo_doc)
+    
+    # Crear seguimiento si no existe
+    seguimiento_existente = get_seguimiento_by_pedido_id(db, pedido_id)
+    if not seguimiento_existente:
+        nuevo_seguimiento = SeguimientoDB(
+            pedido_id=pedido.id,
+            estado=EstadoSeguimiento.en_camino,
+            hora_estimada_llegada=(datetime.now(timezone.utc) + timedelta(hours=1)).time().isoformat()
+        )
+        db.add(nuevo_seguimiento)
+    
+    db.commit()
+    db.refresh(pedido)
+    
+    # Enviar email de confirmación
+    cuerpo_html = f"""
+    <h1>¡Tu pago ha sido aprobado!</h1>
+    <p>Hola {current_user.nombre or current_user.email},</p>
+    <p>Tu pago para el pedido <strong>Nº {pedido.id}</strong> por un total de <strong>${pedido.total}</strong> ha sido procesado.</p>
+    <p>Ya estamos preparando tus chocolates.</p>
+    <p>¡Gracias por tu compra!</p>
+    """
     await enviar_email_async(
-        asunto=asunto,
-        email_destinatario=email_destinatario,
+        asunto=f"Confirmación de Pedido Chocomanía Nº {pedido.id}",
+        email_destinatario=current_user.email,
         cuerpo_html=cuerpo_html
     )
     
-    return {"mensaje": f"Email de {doc.tipo.value} enviado a {email_destinatario}"}
-
-
-# --- ENDPOINTS DE REPORTES Y DASHBOARD ---
-@app.get("/reportes/ventas")
-def generar_reporte_ventas(fecha_inicio: date, fecha_fin: date, formato: str = "json", admin_user: UsuarioDB = Depends(get_current_admin_user), db: Session = Depends(get_db)):
-    estados_de_venta = [EstadoPedido.pagado, EstadoPedido.en_preparacion, EstadoPedido.despachado, EstadoPedido.entregado]
-    pedidos_pagados = db.query(PedidoDB).filter(
-        PedidoDB.estado.in_(estados_de_venta),
-        func.date(PedidoDB.fecha_creacion) >= fecha_inicio,
-        func.date(PedidoDB.fecha_creacion) <= fecha_fin
-    ).all()
-    if not pedidos_pagados:
-        return {"mensaje": "Sin datos disponibles para este período"}
-    total_ventas = sum(p.total for p in pedidos_pagados)
-    detalle_pedidos = [{"id": p.id, "fecha": p.fecha_creacion.isoformat(), "total": p.total} for p in pedidos_pagados]
-    reporte_data = {
-        "periodo": f"{fecha_inicio.isoformat()} al {fecha_fin.isoformat()}",
-        "total_ventas": total_ventas,
-        "cantidad_pedidos": len(pedidos_pagados),
-        "detalle": detalle_pedidos
+    return {
+        "mensaje": "Pago aprobado exitosamente",
+        "estado": "pagado",
+        "pedido_id": pedido.id
     }
-    if formato == "json":
-        return reporte_data
-    elif formato == "excel" or formato == "pdf":
-        output = io.StringIO()
-        output.write("id,fecha,total\n")
-        for p in detalle_pedidos: output.write(f"{p['id']},{p['fecha']},{p['total']}\n")
-        file_content = output.getvalue()
-        output.close()
-        return StreamingResponse(
-            io.BytesIO(file_content.encode("utf-8")),
-            media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename=reporte_{fecha_inicio}_a_{fecha_fin}.csv"}
-        )
-    return HTTPException(status_code=400, detail="Formato no soportado")
 
-@app.get("/dashboard/ventas", response_model=DashboardVentas)
-def get_dashboard_ventas(fecha: date, admin_user: UsuarioDB = Depends(get_current_admin_user), db: Session = Depends(get_db)):
-    estados_de_venta = [EstadoPedido.pagado, EstadoPedido.en_preparacion, EstadoPedido.despachado, EstadoPedido.entregado]
-    pedidos_del_dia = db.query(PedidoDB).filter(
-        PedidoDB.estado.in_(estados_de_venta),
-        func.date(PedidoDB.fecha_creacion) == fecha
-    ).all()
-    if not pedidos_del_dia:
-        raise HTTPException(status_code=404, detail="No hay ventas para la fecha seleccionada")
-    total_acumulado = sum(p.total for p in pedidos_del_dia)
-    ticket_promedio = total_acumulado / len(pedidos_del_dia)
-    top_productos_simulado = ["Bombones Finos (BBDD)", "Tableta Amarga (BBDD)"]
-    ventas_por_hora_simulado = [VentasPorHora(hora=h, total=round(random.uniform(5000, 20000), 0)) for h in range(9, 18)]
-    return DashboardVentas(
-        total_acumulado=total_acumulado,
-        ticket_promedio=ticket_promedio,
-        top_productos=top_productos_simulado,
-        ventas_por_hora=ventas_por_hora_simulado
-    )
+# ¡NUEVO! Schema para actualizar estado de pedido
+class EstadoPedidoInput(BaseModel):
+    estado: EstadoPedido
 
-@app.get("/dashboard/pedidos-en-curso", response_model=List[DashboardPedidoActivo])
-def get_dashboard_pedidos_activos(fecha: date, admin_user: UsuarioDB = Depends(get_current_admin_user), db: Session = Depends(get_db)):
-    estados_activos = [EstadoPedido.en_preparacion, EstadoPedido.despachado]
-    pedidos_activos = db.query(PedidoDB).filter(
-        PedidoDB.estado.in_(estados_activos),
-        func.date(PedidoDB.fecha_creacion) == fecha
-    ).all()
-    dashboard_list = []
-    for p in pedidos_activos:
-        cliente = get_usuario_by_id(db, p.usuario_id)
-        dashboard_list.append(DashboardPedidoActivo(
-            id=f"P-{p.id}",
-            cliente=cliente.nombre if cliente else "N/A",
-            estado=p.estado.value,
-            tiempo_estimado=f"{random.randint(5, 20)} min",
-            encargado="Laura Pérez (Simulado)"
-        ))
-    return dashboard_list
-
-
-# --- ENDPOINTS DE NOTIFICACIONES ---
-def enviar_notificacion_interna(db: Session, notificacion_input: EnviarNotificacionInput):
-    pedido = get_pedido_by_id(db, notificacion_input.pedido_id)
-    if not pedido: return 
-    mensaje = f"Tu pedido {pedido.id} "
-    hora_estimada_str = None
-    if notificacion_input.tipo == TipoNotificacion.pedido_despachado:
-        seguimiento = get_seguimiento_by_pedido_id(db, pedido.id)
-        if seguimiento and seguimiento.hora_estimada_llegada:
-             hora_estimada_str = seguimiento.hora_estimada_llegada
-             mensaje += f"ha sido despachado. Llegada estimada: {hora_estimada_str}."
-        else:
-             mensaje += "ha sido despachado."
-    elif notificacion_input.tipo == TipoNotificacion.retraso_entrega:
-        mensaje += f"sufrirá un retraso. {notificacion_input.mensaje_opcional or ''}"
-    nueva_notificacion_db = NotificacionDB(pedido_id=pedido.id, tipo=notificacion_input.tipo, mensaje=mensaje, hora_estimada=hora_estimada_str)
-    db.add(nueva_notificacion_db)
-    print(f"NOTIFICACION (Simulada) para Pedido {pedido.id}: {mensaje}")
-    return nueva_notificacion_db
-
-@app.post("/notificaciones/enviar", response_model=NotificacionSchema, status_code=201)
-def enviar_notificacion_endpoint(notificacion_input: EnviarNotificacionInput, db: Session = Depends(get_db)):
-    notificacion = enviar_notificacion_interna(db, notificacion_input)
-    if not notificacion:
-         raise HTTPException(status_code=404, detail="Pedido no encontrado para notificar")
-    db.commit() 
-    db.refresh(notificacion)
-    return notificacion
-
-@app.put("/notificaciones/pedido/{pedido_id}/actualizar", response_model=NotificacionSchema)
-def actualizar_notificacion_endpoint(pedido_id: int, update_input: ActualizarNotificacionInput, db: Session = Depends(get_db)):
-    notificaciones_pedido = get_notificacion_by_pedido_id(db, pedido_id)
-    if not notificaciones_pedido:
-        raise HTTPException(status_code=404, detail="No hay notificaciones para este pedido")
-    ultima_notificacion = notificaciones_pedido[-1]
-    ultima_notificacion.mensaje = update_input.mensaje_nuevo
-    if update_input.nueva_hora_estimada:
-        ultima_notificacion.hora_estimada = update_input.nueva_hora_estimada.isoformat()
+# ¡NUEVO ENDPOINT! PUT para actualizar estado de pedido
+@app.put("/pedidos/{pedido_id}", response_model=PedidoSchema)
+def actualizar_estado_pedido(
+    pedido_id: int,
+    estado_input: EstadoPedidoInput,
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Actualiza el estado de un pedido.
+    """
+    pedido = get_pedido_by_id(db, pedido_id)
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    # Verificar permisos
+    if current_user.rol != Roles.administrador and pedido.usuario_id != current_user.id:
+        raise HTTPException(status_code=403, detail="No tienes permiso para modificar este pedido")
+    
+    # Actualizar estado
+    pedido.estado = estado_input.estado
     db.commit()
-    db.refresh(ultima_notificacion)
-    print(f"NOTIFICACION ACTUALIZADA (Simulada) Pedido {pedido_id}: {ultima_notificacion.mensaje}")
-    return ultima_notificacion
+    db.refresh(pedido)
+    
+    print(f"Pedido {pedido_id} actualizado a estado: {estado_input.estado.value}")
+    return pedido
 
+# ¡NUEVO ENDPOINT! PATCH para actualizar estado de pedido
+@app.patch("/pedidos/{pedido_id}", response_model=PedidoSchema)
+def actualizar_pedido_parcial(
+    pedido_id: int,
+    estado_input: EstadoPedidoInput,
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Actualiza parcialmente un pedido (PATCH).
+    """
+    return actualizar_estado_pedido(pedido_id, estado_input, current_user, db)
+
+# ¡NUEVO ENDPOINT! Obtener pedidos sin repartidor asignado (Admin)
+@app.get("/admin/pedidos/sin-asignar", response_model=List[dict])
+def obtener_pedidos_sin_asignar(
+    admin_user: UsuarioDB = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene todos los pedidos pagados o en preparación sin repartidor asignado.
+    """
+    estados_para_asignar = [EstadoPedido.pagado, EstadoPedido.en_preparacion]
+    
+    pedidos = db.query(PedidoDB).filter(
+        PedidoDB.estado.in_(estados_para_asignar)
+    ).all()
+    
+    result = []
+    for pedido in pedidos:
+        # Verificar si tiene seguimiento y repartidor asignado
+        seguimiento = get_seguimiento_by_pedido_id(db, pedido.id)
+        
+        # Solo incluir si no tiene repartidor asignado
+        if not seguimiento or not seguimiento.repartidor_asignado:
+            cliente = get_usuario_by_id(db, pedido.usuario_id)
+            result.append({
+                "id": pedido.id,
+                "clientName": cliente.nombre if cliente and cliente.nombre else "Cliente",
+                "total": pedido.total,
+                "estado": pedido.estado.value,
+                "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None
+            })
+    
+    return result
+
+# ¡NUEVO SCHEMA! Para asignar repartidor
+class AsignarRepartidorInput(BaseModel):
+    repartidor_id: int
+
+# ¡NUEVO ENDPOINT! Asignar repartidor a pedido (Admin)
+@app.put("/admin/pedidos/{pedido_id}/asignar-repartidor", response_model=dict)
+def asignar_repartidor_a_pedido(
+    pedido_id: int,
+    asignar_input: AsignarRepartidorInput,
+    admin_user: UsuarioDB = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Asigna un repartidor a un pedido específico.
+    """
+    pedido = get_pedido_by_id(db, pedido_id)
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    repartidor = get_usuario_by_id(db, asignar_input.repartidor_id)
+    if not repartidor or repartidor.rol != Roles.repartidor:
+        raise HTTPException(status_code=404, detail="Repartidor no encontrado o no tiene rol de repartidor")
+    
+    # Buscar o crear seguimiento
+    seguimiento = get_seguimiento_by_pedido_id(db, pedido_id)
+    if not seguimiento:
+        seguimiento = SeguimientoDB(
+            pedido_id=pedido.id,
+            estado=EstadoSeguimiento.en_camino,
+            hora_estimada_llegada=(datetime.now(timezone.utc) + timedelta(hours=1)).time().isoformat()
+        )
+        db.add(seguimiento)
+    
+    # Asignar repartidor
+    seguimiento.repartidor_asignado = repartidor.nombre or repartidor.email
+    
+    # Cambiar estado del pedido a despachado
+    pedido.estado = EstadoPedido.despachado
+    
+    db.commit()
+    db.refresh(seguimiento)
+    
+    print(f"Pedido {pedido_id} asignado a repartidor {repartidor.email}")
+    
+    return {
+        "mensaje": f"Pedido #{pedido_id} asignado a {repartidor.nombre or repartidor.email}",
+        "pedido_id": pedido_id,
+        "repartidor_id": repartidor.id,
+        "repartidor_nombre": repartidor.nombre or repartidor.email
+    }
+
+# ¡NUEVO ENDPOINT! Obtener pedidos pendientes de despacho (para repartidores)
+@app.get("/pedidos/pendientes/despacho", response_model=List[dict])
+def obtener_pedidos_pendientes_despacho(
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene pedidos despachados asignados al repartidor actual.
+    Si es admin, muestra todos los pedidos despachados.
+    """
+    # Si es repartidor, mostrar solo sus pedidos asignados
+    if current_user.rol == Roles.repartidor:
+        # Buscar pedidos donde el seguimiento tiene asignado a este repartidor
+        pedidos = db.query(PedidoDB).filter(
+            PedidoDB.estado == EstadoPedido.despachado
+        ).all()
+        
+        result = []
+        for pedido in pedidos:
+            seguimiento = get_seguimiento_by_pedido_id(db, pedido.id)
+            # Solo incluir si está asignado a este repartidor
+            if seguimiento and seguimiento.repartidor_asignado:
+                repartidor_nombre = current_user.nombre or current_user.email
+                if seguimiento.repartidor_asignado == repartidor_nombre:
+                    cliente = get_usuario_by_id(db, pedido.usuario_id)
+                    result.append({
+                        "id": pedido.id,
+                        "clientName": cliente.nombre if cliente and cliente.nombre else "Cliente",
+                        "address": cliente.direccion if cliente and cliente.direccion else "Sin dirección",
+                        "phone": cliente.telefono if cliente and cliente.telefono else "Sin teléfono",
+                        "total": pedido.total,
+                        "estado": pedido.estado.value,
+                        "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None
+                    })
+        return result
+    
+    # Si es admin, mostrar todos los pedidos despachados
+    elif current_user.rol == Roles.administrador:
+        pedidos = db.query(PedidoDB).filter(
+            PedidoDB.estado == EstadoPedido.despachado
+        ).all()
+        
+        result = []
+        for pedido in pedidos:
+            cliente = get_usuario_by_id(db, pedido.usuario_id)
+            seguimiento = get_seguimiento_by_pedido_id(db, pedido.id)
+            result.append({
+                "id": pedido.id,
+                "clientName": cliente.nombre if cliente and cliente.nombre else "Cliente",
+                "address": cliente.direccion if cliente and cliente.direccion else "Sin dirección",
+                "phone": cliente.telefono if cliente and cliente.telefono else "Sin teléfono",
+                "total": pedido.total,
+                "estado": pedido.estado.value,
+                "repartidor": seguimiento.repartidor_asignado if seguimiento else "Sin asignar",
+                "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None
+            })
+        return result
+    
+    # Cliente normal no debería acceder aquí
+    else:
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver estos pedidos")
+
+# ¡NUEVO ENDPOINT! Marcar pedido como "en camino"
+@app.put("/pedidos/{pedido_id}/en-camino", response_model=dict)
+def marcar_pedido_en_camino(
+    pedido_id: int,
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Marca un pedido como despachado/en camino.
+    Solo para repartidores o admin.
+    """
+    if current_user.rol not in [Roles.repartidor, Roles.administrador]:
+        raise HTTPException(status_code=403, detail="Solo repartidores o admin pueden marcar pedidos en camino")
+    
+    pedido = get_pedido_by_id(db, pedido_id)
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    # Cambiar estado a despachado
+    pedido.estado = EstadoPedido.despachado
+    
+    # Crear o actualizar seguimiento
+    seguimiento = get_seguimiento_by_pedido_id(db, pedido_id)
+    if not seguimiento:
+        seguimiento = SeguimientoDB(
+            pedido_id=pedido.id,
+            estado=EstadoSeguimiento.en_camino,
+            hora_estimada_llegada=(datetime.now(timezone.utc) + timedelta(hours=1)).time().isoformat(),
+            repartidor_asignado=current_user.nombre or current_user.email
+        )
+        db.add(seguimiento)
+    else:
+        seguimiento.estado = EstadoSeguimiento.en_camino
+        if not seguimiento.repartidor_asignado:
+            seguimiento.repartidor_asignado = current_user.nombre or current_user.email
+    
+    db.commit()
+    db.refresh(pedido)
+    
+    print(f"Pedido {pedido_id} marcado como EN CAMINO por {current_user.email}")
+    
+    return {
+        "mensaje": f"Pedido #{pedido_id} está en camino",
+        "estado": "despachado",
+        "pedido_id": pedido_id
+    }
 
 # --- ENDPOINTS DE SEGUIMIENTO ---
-@app.get("/seguimiento/{pedido_id}", response_model=SeguimientoSchema)
+@app.get("/seguimiento/{pedido_id}", response_model=dict)
 def obtener_seguimiento_cliente(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
     pedido = get_pedido_by_id(db, pedido_id)
-    if not pedido or pedido.usuario_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado o no autorizado")
-    seguimiento = get_seguimiento_by_pedido_id(db, pedido.id)
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    # Permitir acceso si es el dueño, repartidor o admin
+    if pedido.usuario_id != current_user.id and current_user.rol not in [Roles.repartidor, Roles.administrador]:
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver este seguimiento")
+    
+    seguimiento = get_seguimiento_by_pedido_id(db, pedido_id)
+    
+    # Si no hay seguimiento, crear uno automáticamente para pedidos pagados
     if not seguimiento:
-         raise HTTPException(status_code=404, detail="Seguimiento no iniciado para este pedido")
+        if pedido.estado in [EstadoPedido.pagado, EstadoPedido.en_preparacion, EstadoPedido.despachado]:
+            # ✅ Generar ubicación fija basada en el ID del pedido
+            base_lat = -33.45 + (pedido_id % 10) * 0.001
+            base_lng = -70.65 + (pedido_id % 10) * 0.001
+            
+            seguimiento = SeguimientoDB(
+                pedido_id=pedido.id,
+                estado=EstadoSeguimiento.en_camino,
+                hora_estimada_llegada=(datetime.now(timezone.utc) + timedelta(hours=1)).time().isoformat(),
+                lat=base_lat,
+                lng=base_lng
+            )
+            db.add(seguimiento)
+            db.commit()
+            db.refresh(seguimiento)
+        else:
+            raise HTTPException(status_code=404, detail="Seguimiento no iniciado para este pedido")
+    
+    # ✅ Solo actualizar ubicación si no existe (simular movimiento gradual)
     if seguimiento.estado == EstadoSeguimiento.en_camino:
-        seguimiento.lat = round(random.uniform(-33.4, -33.5), 6)
-        seguimiento.lng = round(random.uniform(-70.6, -70.7), 6)
+        if seguimiento.lat is None or seguimiento.lng is None:
+            # Ubicación inicial basada en ID
+            seguimiento.lat = -33.45 + (pedido_id % 10) * 0.001
+            seguimiento.lng = -70.65 + (pedido_id % 10) * 0.001
+        else:
+            # Simular pequeño movimiento (no random completo)
+            seguimiento.lat += random.uniform(-0.0005, 0.0005)
+            seguimiento.lng += random.uniform(-0.0005, 0.0005)
         db.commit()
         db.refresh(seguimiento)
-    return seguimiento
+    
+    return {
+        "pedido_id": seguimiento.pedido_id,
+        "estado": seguimiento.estado.value,
+        "hora_estimada_llegada": seguimiento.hora_estimada_llegada,
+        "repartidor_asignado": seguimiento.repartidor_asignado,
+        "ubicacion_actual": {
+            "lat": seguimiento.lat,
+            "lng": seguimiento.lng
+        } if seguimiento.lat and seguimiento.lng else None
+    }
 
 @app.put("/seguimiento/{pedido_id}/entregar", response_model=SeguimientoSchema)
 def confirmar_entrega_repartidor(pedido_id: int, entrega_input: ConfirmarEntregaInput, repartidor: UsuarioDB = Depends(get_current_repartidor_user), db: Session = Depends(get_db)):
@@ -1096,29 +1272,74 @@ def confirmar_entrega_repartidor(pedido_id: int, entrega_input: ConfirmarEntrega
     db.commit()
     db.refresh(seguimiento)
     return seguimiento
-@app.get("/pedidos", response_model=List[dict])
-async def obtener_pedidos(current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Obtener todos los pedidos del usuario actual
-    """
-    pedidos = db.query(PedidoDB).filter(PedidoDB.usuario_id == current_user.id).all()
-    
-    # Convertir a diccionario para respuesta
-    result = []
-    for pedido in pedidos:
-        result.append({
-            "id": pedido.id,
-            "usuario_id": pedido.usuario_id,
-            "total": pedido.total,
-            "estado": pedido.estado,
-            "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None,
-            "clientName": current_user.nombre if hasattr(current_user, 'nombre') else "Cliente",
-            "address": current_user.direccion if hasattr(current_user, 'direccion') else "Dirección no especificada",
-            "phone": current_user.telefono if hasattr(current_user, 'telefono') else "No especificado"
-        })
-    
-    return result
 
+# ============================================
+# ✅ ENDPOINTS DE PEDIDOS (SIN DUPLICADOS)
+# ============================================
+
+# 1. Ruta específica PRIMERO
+@app.get("/pedidos/pendientes/despacho", response_model=List[dict])
+def obtener_pedidos_pendientes_despacho(
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene pedidos despachados asignados al repartidor actual.
+    Si es admin, muestra todos los pedidos despachados.
+    """
+    # Si es repartidor, mostrar solo sus pedidos asignados
+    if current_user.rol == Roles.repartidor:
+        # Buscar pedidos donde el seguimiento tiene asignado a este repartidor
+        pedidos = db.query(PedidoDB).filter(
+            PedidoDB.estado == EstadoPedido.despachado
+        ).all()
+        
+        result = []
+        for pedido in pedidos:
+            seguimiento = get_seguimiento_by_pedido_id(db, pedido.id)
+            # Solo incluir si está asignado a este repartidor
+            if seguimiento and seguimiento.repartidor_asignado:
+                repartidor_nombre = current_user.nombre or current_user.email
+                if seguimiento.repartidor_asignado == repartidor_nombre:
+                    cliente = get_usuario_by_id(db, pedido.usuario_id)
+                    result.append({
+                        "id": pedido.id,
+                        "clientName": cliente.nombre if cliente and cliente.nombre else "Cliente",
+                        "address": cliente.direccion if cliente and cliente.direccion else "Sin dirección",
+                        "phone": cliente.telefono if cliente and cliente.telefono else "Sin teléfono",
+                        "total": pedido.total,
+                        "estado": pedido.estado.value,
+                        "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None
+                    })
+        return result
+    
+    # Si es admin, mostrar todos los pedidos despachados
+    elif current_user.rol == Roles.administrador:
+        pedidos = db.query(PedidoDB).filter(
+            PedidoDB.estado == EstadoPedido.despachado
+        ).all()
+        
+        result = []
+        for pedido in pedidos:
+            cliente = get_usuario_by_id(db, pedido.usuario_id)
+            seguimiento = get_seguimiento_by_pedido_id(db, pedido.id)
+            result.append({
+                "id": pedido.id,
+                "clientName": cliente.nombre if cliente and cliente.nombre else "Cliente",
+                "address": cliente.direccion if cliente and cliente.direccion else "Sin dirección",
+                "phone": cliente.telefono if cliente and cliente.telefono else "Sin teléfono",
+                "total": pedido.total,
+                "estado": pedido.estado.value,
+                "repartidor": seguimiento.repartidor_asignado if seguimiento else "Sin asignar",
+                "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None
+            })
+        return result
+    
+    # Cliente normal no debería acceder aquí
+    else:
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver estos pedidos")
+
+# 2. Ruta con parámetro
 @app.get("/pedidos/{pedido_id}", response_model=dict)
 async def obtener_pedido_por_id(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """
@@ -1136,6 +1357,29 @@ async def obtener_pedido_por_id(pedido_id: int, current_user: UsuarioDB = Depend
         "id": pedido.id,
         "usuario_id": pedido.usuario_id,
         "total": pedido.total,
-        "estado": pedido.estado,
+        "estado": pedido.estado.value if hasattr(pedido.estado, 'value') else pedido.estado,
         "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None
     }
+
+# 3. Ruta base AL FINAL
+@app.get("/pedidos", response_model=List[dict])
+async def obtener_pedidos(current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Obtener todos los pedidos del usuario actual
+    """
+    pedidos = db.query(PedidoDB).filter(PedidoDB.usuario_id == current_user.id).all()
+    
+    result = []
+    for pedido in pedidos:
+        result.append({
+            "id": pedido.id,
+            "usuario_id": pedido.usuario_id,
+            "total": pedido.total,
+            "estado": pedido.estado.value if hasattr(pedido.estado, 'value') else pedido.estado,
+            "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None,
+            "clientName": current_user.nombre if current_user.nombre else "Cliente",
+            "address": current_user.direccion if current_user.direccion else "Dirección no especificada",
+            "phone": current_user.telefono if current_user.telefono else "No especificado"
+        })
+    
+    return result

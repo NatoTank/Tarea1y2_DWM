@@ -346,7 +346,6 @@
             const emptyMsg = document.getElementById('emptyOrdersMessage');
 
             try {
-                // Endpoint correcto: /pedidos
                 const response = await fetch(`${API_URL}/pedidos`, {
                     headers: getAuthHeaders()
                 });
@@ -354,47 +353,46 @@
                 if (response.ok) {
                     const orders = await response.json();
 
-                    // Si no hay pedidos
                     if (orders.length === 0) {
                         container.classList.add('d-none');
                         emptyMsg.classList.remove('d-none');
                         return;
                     }
 
-                    // Mostrar tabla
                     container.classList.remove('d-none');
                     emptyMsg.classList.add('d-none');
                     tableBody.innerHTML = '';
 
-                    // Ordenar: Más nuevos primero
                     orders.sort((a, b) => {
                         const dateA = new Date(a.fecha_creacion || 0);
                         const dateB = new Date(b.fecha_creacion || 0);
                         return dateB - dateA;
                     });
 
-                    // Renderizar filas
                     orders.forEach(order => {
-                        // Lógica de Estados y Botones
                         let badgeClass = '';
                         let statusText = '';
                         let actionBtn = '';
 
-                        // Normalizar estado a minúsculas para comparación
                         const estado = (order.estado || '').toLowerCase();
 
+                        // ✅ LÓGICA DE ESTADOS CORREGIDA
                         if (estado === 'pendiente_de_pago' || estado === 'pending_payment') {
                             badgeClass = 'status-pending';
-                            statusText = 'Pendiente Pago';
+                            statusText = '⏳ Pendiente Pago';
                             actionBtn = getCancelBtn(order.id);
-                        } else if (estado === 'pagado' || estado === 'en_preparacion') {
+                        } else if (estado === 'pagado') {
+                            // ✅ ESTADO PAGADO - Mostrar correctamente
                             badgeClass = 'status-shipped';
-                            statusText = 'Pago Recibido';
+                            statusText = '✅ Pago Aprobado';
+                            actionBtn = getCancelBtn(order.id);
+                        } else if (estado === 'en_preparacion') {
+                            badgeClass = 'status-processing';
+                            statusText = '🍫 En Preparación';
                             actionBtn = getCancelBtn(order.id);
                         } else if (estado === 'despachado' || estado === 'en_camino') {
                             badgeClass = 'status-in-transit';
-                            statusText = 'En Camino';
-                            // ✅ BOTÓN PARA VER SEGUIMIENTO ACTUALIZADO
+                            statusText = '🚚 En Camino';
                             actionBtn = `
                                 <button class="btn btn-primary-small track-btn" onclick="irAlSeguimiento(${order.id})">
                                     <i class="fas fa-map-marker-alt me-1"></i>Seguir Pedido
@@ -402,11 +400,11 @@
                             `;
                         } else if (estado === 'entregado') {
                             badgeClass = 'status-delivered';
-                            statusText = 'Entregado';
+                            statusText = '📦 Entregado';
                             actionBtn = '<button class="btn btn-disabled" disabled><i class="fas fa-check"></i> Completado</button>';
                         } else if (estado === 'cancelado' || estado === 'rechazado') {
                             badgeClass = 'status-canceled';
-                            statusText = 'Cancelado';
+                            statusText = '❌ Cancelado';
                             actionBtn = '<button class="btn btn-disabled" disabled>Cancelado</button>';
                         } else {
                             badgeClass = 'status-processing';

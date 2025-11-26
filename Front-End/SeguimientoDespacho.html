@@ -442,31 +442,68 @@
         const mapLocation = document.getElementById('mapLocation');
 
         // Variables
-        let trackingInterval = null;
         let currentOrder = null;
         let assignedOrders = [];
+
+        // ✅ SIN INTERVALO AUTOMÁTICO - Solo actualización manual
 
         // 1. INICIALIZAR
         document.addEventListener('DOMContentLoaded', async () => {
             const token = localStorage.getItem('token');
-            if (!token) return window.location.href = "Inicio.html";
+            if (!token) {
+                window.location.href = "Inicio.html";
+                return;
+            }
 
-            // ✅ CARGAR PEDIDOS ASIGNADOS AL REPARTIDOR
-            await loadAssignedOrders();
+            try {
+                // Verificar que sea repartidor
+                const userResponse = await fetch(`${API_URL}/usuarios/me`, {
+                    headers: getAuthHeaders()
+                });
+                
+                if (!userResponse.ok) {
+                    alert("Error de autenticación");
+                    window.location.href = "Inicio.html";
+                    return;
+                }
 
-            // Si hay al menos un pedido, mostrar el primero
-            if (assignedOrders.length > 0) {
-                selectOrder(assignedOrders[0]);
-                loadUserInfo(token);
-                updateTrackingInfo();
-                trackingInterval = setInterval(updateTrackingInfo, 5000);
-            } else {
-                alert("No tienes pedidos asignados.");
+                const user = await userResponse.json();
+                console.log("Usuario actual:", user);
+
+                if (user.rol !== 'repartidor') {
+                    alert("Esta página es solo para repartidores");
+                    window.location.href = "Home.html";
+                    return;
+                }
+
+                // Cargar pedidos asignados
+                await loadAssignedOrders();
+
+                if (assignedOrders.length > 0) {
+                    selectOrder(assignedOrders[0]);
+                    // ✅ SOLO UNA VEZ al cargar, NO hay intervalo
+                    await updateTrackingInfo();
+                } else {
+                    document.getElementById('trackingPage').innerHTML = `
+                        <div class="container text-center py-5">
+                            <i class="fas fa-inbox fa-4x text-muted mb-4"></i>
+                            <h3>No tienes pedidos asignados</h3>
+                            <p class="text-muted">Espera a que el administrador te asigne un pedido.</p>
+                            <a href="Home.html" class="btn btn-choco mt-3">
+                                <i class="fas fa-home me-2"></i>Volver al Inicio
+                            </a>
+                        </div>
+                    `;
+                }
+
+            } catch (error) {
+                console.error("Error:", error);
+                alert("Error de conexión");
                 window.location.href = "Home.html";
             }
         });
 
-        // ✅ CARGAR PEDIDOS ASIGNADOS AL REPARTIDOR
+        // Cargar pedidos asignados
         async function loadAssignedOrders() {
             try {
                 const response = await fetch(`${API_URL}/pedidos/pendientes/despacho`, {
@@ -476,48 +513,31 @@
                 if (response.ok) {
                     assignedOrders = await response.json();
                     console.log("Pedidos asignados:", assignedOrders);
-                } else if (response.status === 403) {
-                    alert("No tienes permisos de repartidor");
-                    window.location.href = "Home.html";
+                } else {
+                    console.log("Error o sin permisos:", response.status);
+                    assignedOrders = [];
                 }
             } catch (error) {
                 console.error("Error cargando pedidos:", error);
-                alert("Error al cargar pedidos asignados");
-                window.location.href = "Home.html";
+                assignedOrders = [];
             }
         }
 
-        // ✅ SELECCIONAR PEDIDO PARA VER DETALLES
+        // Seleccionar pedido
         function selectOrder(order) {
             currentOrder = order;
-            const orderIdNumber = order.id;
             
-            // Actualizar datos en pantalla
             document.getElementById('currentOrderNumber').textContent = `#${order.id}`;
-            document.getElementById('clientName').textContent = order.cliente_nombre;
-            document.getElementById('clientAddress').textContent = order.cliente_direccion;
-            document.getElementById('clientPhone').textContent = order.cliente_telefono;
-            document.getElementById('driverName').textContent = "Carlos González"; // Simulado
+            document.getElementById('clientName').textContent = order.clientName || 'Cliente';
+            document.getElementById('clientAddress').textContent = order.address || 'Sin dirección';
+            document.getElementById('clientPhone').textContent = order.phone || 'Sin teléfono';
+            document.getElementById('driverName').textContent = order.repartidor || "Tú";
             
-            // Actualizar estado
-            const statusText = order.estado.charAt(0).toUpperCase() + order.estado.slice(1);
+            const statusText = (order.estado || 'despachado').replace('_', ' ').toUpperCase();
             document.getElementById('currentStatus').textContent = statusText;
         }
 
-        // 2. CARGAR DATOS CLIENTE
-        async function loadUserInfo(token) {
-            try {
-                const response = await fetch(`${API_URL}/usuarios/me`, {
-                    headers: getAuthHeaders()
-                });
-                if (response.ok) {
-                    const user = await response.json();
-                    // Ya tenemos los datos del cliente en currentOrder
-                }
-            } catch (e) { console.error(e); }
-        }
-
-        // 3. CONSULTAR API DE SEGUIMIENTO
+        // ✅ Actualizar info de seguimiento (SOLO cuando se llama manualmente)
         async function updateTrackingInfo() {
             if (!currentOrder) return;
 
@@ -529,36 +549,30 @@
                 if (response.ok) {
                     const data = await response.json();
                     
-                    // Actualizar Estado
                     const statusBadge = document.getElementById('currentStatus');
-                    statusBadge.textContent = data.estado.toUpperCase();
+                    statusBadge.textContent = (data.estado || 'EN CAMINO').toUpperCase();
                     
                     if (data.estado === 'Entregado' || data.estado === 'entregado') {
                         statusBadge.className = 'status-badge status-entregado ms-2';
-                        clearInterval(trackingInterval);
                         showPage('confirmationPage');
                         document.getElementById('deliveredOrderNumber').textContent = `#${currentOrder.id}`;
-                        document.getElementById('deliveredTo').textContent = currentOrder.cliente_nombre;
-                        document.getElementById('deliveryLocation').textContent = currentOrder.cliente_direccion;
+                        document.getElementById('deliveredTo').textContent = currentOrder.clientName || 'Cliente';
+                        document.getElementById('deliveryLocation').textContent = currentOrder.address || 'Dirección';
+                        document.getElementById('deliveryTime').textContent = new Date().toLocaleTimeString('es-CL', {hour: '2-digit', minute:'2-digit'});
                     } else {
                         statusBadge.className = 'status-badge status-en-camino ms-2';
                     }
 
-                    // Actualizar Hora Estimada
                     if (data.hora_estimada_llegada) {
-                        const hora = data.hora_estimada_llegada.split('T')[1]?.substring(0, 5) || data.hora_estimada_llegada;
-                        document.getElementById('estimatedTime').textContent = hora;
+                        document.getElementById('estimatedTime').textContent = data.hora_estimada_llegada;
                     }
 
-                    // Actualizar ubicación
-                    if (data.lat && data.lng) {
+                    if (data.ubicacion_actual && data.ubicacion_actual.lat && data.ubicacion_actual.lng) {
                         document.getElementById('mapLocation').innerHTML = `
-                            <div style="font-size: 1.2rem;">
-                                <i class="fas fa-map-marker-alt text-danger"></i>
-                                <br>
-                                <strong>Ubicación Actual:</strong><br>
-                                Lat: ${data.lat.toFixed(4)} <br>
-                                Lng: ${data.lng.toFixed(4)}
+                            <div style="font-size: 1.1rem;">
+                                <i class="fas fa-map-marker-alt"></i><br>
+                                <strong>Ubicación:</strong><br>
+                                ${data.ubicacion_actual.lat.toFixed(4)}, ${data.ubicacion_actual.lng.toFixed(4)}
                             </div>
                         `;
                     }
@@ -568,7 +582,7 @@
             }
         }
 
-        // 4. MARCAR COMO "EN CAMINO"
+        // Marcar como "EN CAMINO"
         document.getElementById('startRoute').addEventListener('click', async function() {
             if (!currentOrder) return;
 
@@ -582,11 +596,11 @@
                 });
 
                 if (response.ok) {
-                    alert("Pedido marcado como EN CAMINO");
-                    currentOrder.estado = 'en_camino';
-                    selectOrder(currentOrder);
+                    alert("✅ Pedido marcado como EN CAMINO");
+                    document.getElementById('currentStatus').textContent = 'EN CAMINO';
                 } else {
-                    alert("Error al actualizar pedido");
+                    const err = await response.json();
+                    alert("Error: " + (err.detail || "No se pudo actualizar"));
                 }
             } catch (error) {
                 console.error(error);
@@ -597,29 +611,31 @@
             }
         });
 
-        // 5. CONFIRMAR ENTREGA
+        // Confirmar entrega
         document.getElementById('confirmDelivery').addEventListener('click', async function() {
             if (!currentOrder) return;
+            if (!confirm("¿Confirmar que el pedido fue entregado?")) return;
 
             this.disabled = true;
             this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Confirmando...';
 
             try {
-                const response = await fetch(`${API_URL}/pedidos/${currentOrder.id}/entregado`, {
+                const response = await fetch(`${API_URL}/seguimiento/${currentOrder.id}/entregar`, {
                     method: 'PUT',
-                    headers: getAuthHeaders()
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ confirmacion_texto: "Entregado OK" })
                 });
 
                 if (response.ok) {
-                    alert("¡Entrega confirmada!");
-                    currentOrder.estado = 'entregado';
-                    
+                    alert("✅ ¡Entrega confirmada!");
                     showPage('confirmationPage');
                     document.getElementById('deliveredOrderNumber').textContent = `#${currentOrder.id}`;
-                    document.getElementById('deliveredTo').textContent = currentOrder.cliente_nombre;
-                    document.getElementById('deliveryLocation').textContent = currentOrder.cliente_direccion;
+                    document.getElementById('deliveredTo').textContent = currentOrder.clientName || 'Cliente';
+                    document.getElementById('deliveryLocation').textContent = currentOrder.address || 'Dirección';
+                    document.getElementById('deliveryTime').textContent = new Date().toLocaleTimeString('es-CL', {hour: '2-digit', minute:'2-digit'});
                 } else {
-                    alert("Error al confirmar entrega");
+                    const err = await response.json();
+                    alert("Error: " + (err.detail || "No se pudo confirmar"));
                 }
             } catch (error) {
                 console.error(error);
@@ -630,20 +646,40 @@
             }
         });
 
-        // UI: Navegación entre "páginas" (divs)
+        // Navegación
         function showPage(pageId) {
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
             document.getElementById(pageId).classList.add('active');
         }
 
-        // Botones de navegación
         document.getElementById('viewOrdersBtn').onclick = () => window.location.href = "CancelacionPedido.html";
-        document.getElementById('backToTracking').onclick = () => showPage('trackingPage');
         
-        // Botón Reportar (Simulado)
+        document.getElementById('backToTracking').onclick = () => {
+            showPage('trackingPage');
+            loadAssignedOrders().then(() => {
+                if (assignedOrders.length > 0) selectOrder(assignedOrders[0]);
+            });
+        };
+        
+        // ✅ BOTÓN MANUAL para actualizar ubicación
+        document.getElementById('updateLocation').onclick = async () => {
+            document.getElementById('updateLocation').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+            await updateTrackingInfo();
+            document.getElementById('updateLocation').innerHTML = '<i class="fas fa-sync-alt me-2"></i>Actualizar Ubicación';
+            alert("✅ Ubicación actualizada");
+        };
+
+        document.getElementById('callDriver').onclick = () => {
+            if (currentOrder && currentOrder.phone) {
+                window.open(`tel:${currentOrder.phone}`);
+            } else {
+                alert("Teléfono no disponible");
+            }
+        };
+        
         document.getElementById('reportProblem').onclick = () => alert("Reporte enviado a soporte.");
 
-        // ESTRELLAS (Calificación)
+        // Estrellas
         const stars = document.querySelectorAll('.star-rating i');
         stars.forEach(star => {
             star.addEventListener('click', function() {
@@ -660,7 +696,8 @@
             alert("¡Gracias por tu opinión!");
             window.location.href = "Home.html";
         };
-
+        
+        document.getElementById('skipReview').onclick = () => window.location.href = "Home.html";
     </script>
 </body>
 </html>
