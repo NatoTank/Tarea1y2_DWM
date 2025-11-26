@@ -602,14 +602,54 @@ def crear_promocion(promo_input: PromocionCreate, admin_user: UsuarioDB = Depend
     db.refresh(nueva_promo)
     return nueva_promo
 
-@app.get("/promociones/activas", response_model=List[PromocionSchema])
+@app.get("/promociones/activas", response_model=List[dict])
 def leer_promociones_activas(db: Session = Depends(get_db)):
+    """
+    Obtiene promociones activas con información completa del producto.
+    """
     ahora = datetime.now(timezone.utc)
+    
+    print(f"🔍 Buscando promociones activas después de: {ahora}")
+    
     promociones = db.query(PromocionDB).filter(
         PromocionDB.activo == True,
         PromocionDB.fecha_termino > ahora
     ).all()
-    return promociones
+    
+    print(f"✅ Promociones encontradas en BD: {len(promociones)}")
+    
+    result = []
+    for promo in promociones:
+        producto = get_producto_by_id(db, promo.producto_id)
+        
+        if not producto:
+            print(f"⚠️ Producto {promo.producto_id} no encontrado")
+            continue
+            
+        if not producto.activo:
+            print(f"⚠️ Producto {producto.nombre} está inactivo")
+            continue
+        
+        descuento = round(((producto.precio - promo.precio_oferta) / producto.precio) * 100)
+        dias_restantes = max((promo.fecha_termino - ahora).days, 0)
+        
+        promo_data = {
+            "id": promo.id,
+            "producto_id": promo.producto_id,
+            "producto_nombre": producto.nombre,
+            "producto_descripcion": producto.descripcion or "Delicioso chocolate artesanal",
+            "precio_original": producto.precio,
+            "precio_oferta": promo.precio_oferta,
+            "descuento_porcentaje": descuento,
+            "fecha_termino": promo.fecha_termino.isoformat(),
+            "dias_restantes": dias_restantes
+        }
+        
+        print(f"📦 Promoción {promo.id}: {producto.nombre} - {descuento}% OFF (${promo.precio_oferta})")
+        result.append(promo_data)
+    
+    print(f"📤 Enviando {len(result)} promociones al frontend")
+    return result
 
 
 # --- (B-11) ENDPOINTS DE CARRITO ---
