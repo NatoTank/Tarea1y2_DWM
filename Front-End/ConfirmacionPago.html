@@ -118,12 +118,13 @@
 
                 if (!orderId) {
                     console.warn("No se encontró ID en sessionStorage ni en URL");
+                    // Usar un ID por defecto para testing
                     orderId = "1";
                 }
 
                 console.log("Procesando pedido ID:", orderId);
 
-                // Obtener datos del pedido
+                // Obtener datos del pedido con mejor manejo de errores
                 const response = await fetch(`${API_URL}/pedidos/${orderId}`, {
                     headers: getAuthHeaders()
                 });
@@ -138,6 +139,7 @@
                 } else if (response.status === 404) {
                     console.warn("Pedido no encontrado en el servidor, usando datos del localStorage");
                     
+                    // Intentar usar datos del localStorage como fallback
                     const pendingOrder = JSON.parse(localStorage.getItem('pendingOrder'));
                     if (pendingOrder) {
                         currentOrder = {
@@ -153,7 +155,7 @@
                 }
 
                 // Mostrar datos del pedido
-                displayOrderData(currentOrder, orderId);
+                displayOrderData(currentOrder);
 
             } catch (error) {
                 console.error("Error:", error);
@@ -163,9 +165,10 @@
         });
 
         // Función para mostrar datos del pedido
-        function displayOrderData(currentOrder, orderId) {
+        function displayOrderData(currentOrder) {
             console.log("Mostrando datos del pedido:", currentOrder);
             
+            const orderId = currentOrder.id || "XXXX";
             const total = currentOrder.total || 0;
 
             // Mostrar datos mientras procesa
@@ -180,13 +183,13 @@
             document.getElementById('paymentDate').textContent = new Date().toLocaleDateString('es-CL');
 
             // Simular procesamiento
-            simulatePaymentProcessing(orderId);
+            simulatePaymentProcessing();
 
             // Limpiar sesión
             sessionStorage.removeItem('lastCreatedOrderId');
         }
 
-        function simulatePaymentProcessing(orderId) {
+        function simulatePaymentProcessing() {
             const progressBar = document.getElementById('paymentProgress');
             let progress = 0;
             
@@ -198,43 +201,11 @@
                 if (progress >= 100) {
                     clearInterval(interval);
                     setTimeout(() => {
-                        // ✅ AQUÍ MARCAMOS EL PEDIDO COMO PAGADO EN LA API
-                        markOrderAsPaid(orderId);
+                        document.getElementById('processingScreen').style.display = 'none';
+                        document.getElementById('confirmationScreen').style.display = 'block';
                     }, 500);
                 }
             }, 400);
-        }
-
-        // ✅ NUEVA FUNCIÓN: Marcar pedido como pagado
-        async function markOrderAsPaid(orderId) {
-            try {
-                console.log("Marcando pedido como pagado:", orderId);
-                
-                const response = await fetch(`${API_URL}/pedidos/${orderId}/pagar`, {
-                    method: 'PUT',
-                    headers: getAuthHeaders(),
-                    body: JSON.stringify({})
-                });
-
-                if (response.ok) {
-                    const result = await response.json();
-                    console.log("Pedido marcado como pagado:", result);
-                    
-                    // Mostrar pantalla de confirmación
-                    document.getElementById('processingScreen').style.display = 'none';
-                    document.getElementById('confirmationScreen').style.display = 'block';
-                } else {
-                    console.error("Error marcando pedido como pagado:", response.status);
-                    // Aún así mostrar confirmación visual
-                    document.getElementById('processingScreen').style.display = 'none';
-                    document.getElementById('confirmationScreen').style.display = 'block';
-                }
-            } catch (error) {
-                console.error("Error:", error);
-                // Mostrar confirmación de todas formas
-                document.getElementById('processingScreen').style.display = 'none';
-                document.getElementById('confirmationScreen').style.display = 'block';
-            }
         }
 
         function downloadReceipt() {

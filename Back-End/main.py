@@ -1,4 +1,3 @@
-import os  # ← CRÍTICO: DEBE ESTAR AQUÍ
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse 
@@ -10,6 +9,7 @@ import io
 import random
 
 # --- IMPORTS DE INTEGRACIÓN ---
+import os
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
 from fastapi.middleware.cors import CORSMiddleware 
 
@@ -31,8 +31,7 @@ from sqlalchemy.ext.declarative import declarative_base
 SQLALCHEMY_DATABASE_URL = "sqlite:///./chocomania.db" 
 
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False
-    }
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -96,9 +95,7 @@ class UsuarioDB(Base):
     comuna = Column(String, nullable=True)
     telefono = Column(String, nullable=True)
     recibirPromos = Column(Boolean, default=True)
-    activo = Column(Boolean, default=True)
-    # ✅ CORREGIDO: Especificar foreign_keys explícitamente
-    pedidos = relationship("PedidoDB", back_populates="dueño", foreign_keys="PedidoDB.usuario_id")
+    pedidos = relationship("PedidoDB", back_populates="dueño")
     carrito = relationship("CarritoDB", back_populates="dueño", uselist=False)
 class ProductoDB(Base):
     __tablename__ = "productos"
@@ -116,13 +113,10 @@ class PedidoDB(Base):
     __tablename__ = "pedidos"
     id = Column(Integer, primary_key=True, index=True)
     usuario_id = Column(Integer, ForeignKey('usuarios.id'))
-    repartidor_id = Column(Integer, ForeignKey('usuarios.id'), nullable=True)
     total = Column(Float)
     estado = Column(SAEnum(EstadoPedido), default=EstadoPedido.pendiente_de_pago)
     fecha_creacion = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    fecha_entrega = Column(DateTime(timezone=True), nullable=True)
-    # ✅ CORREGIDO: Especificar foreign_keys en ambas relaciones
-    dueño = relationship("UsuarioDB", back_populates="pedidos", foreign_keys=[usuario_id])
+    dueño = relationship("UsuarioDB", back_populates="pedidos")
     productos = relationship("ProductoDB", secondary=pedido_items_tabla, back_populates="pedidos")
     seguimiento = relationship("SeguimientoDB", back_populates="pedido", uselist=False)
     notificaciones = relationship("NotificacionDB", back_populates="pedido")
@@ -487,14 +481,45 @@ def cambiar_contraseña(input: CambioContraseñaInput, current_user: UsuarioDB =
     db.commit()
     return {"mensaje": "Contraseña actualizada exitosamente"}
 
-@app.put("/admin/usuarios/{usuario_id}/rol", response_model=UsuarioSchema)
-def asignar_rol(usuario_id: int, rol_input: RolUpdate, admin_user: UsuarioDB = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+# Endpoint para listar todos los usuarios (Solo Admin)
+@app.get("/admin/usuarios", response_model=List[UsuarioSchema])
+def listar_usuarios(
+    admin_user: UsuarioDB = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene la lista completa de usuarios registrados.
+    Requiere rol de administrador.
+    """
+    usuarios = db.query(UsuarioDB).all()
+    return usuarios
+
+# 1. Primero, define este esquema pequeño (puedes ponerlo junto a los otros schemas o justo antes del endpoint)
+class RolInput(BaseModel):
+    rol: Roles  # Coincide con lo que envía el HTML: JSON.stringify({ rol: nuevoRol })
+
+# 2. Reemplaza el endpoint completo por este:
+@app.put("/admin/usuarios/{usuario_id}/asignar-rol", response_model=UsuarioSchema)
+def asignar_rol(
+    usuario_id: int, 
+    rol_input: RolInput, 
+    admin_user: UsuarioDB = Depends(get_current_admin_user), 
+    db: Session = Depends(get_db)
+):
+    # Buscar usuario
     usuario = get_usuario_by_id(db, usuario_id)
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    usuario.rol = rol_input.nuevo_rol
+    
+    # Protección: Evitar que el admin se quite el rol a sí mismo por accidente
+    if usuario.id == admin_user.id and rol_input.rol != Roles.administrador:
+        raise HTTPException(status_code=400, detail="No puedes quitarte el rol de administrador a ti mismo")
+
+    # Actualizar
+    usuario.rol = rol_input.rol
     db.commit()
     db.refresh(usuario)
+    
     return usuario
 
 @app.put("/usuarios/me/datos", response_model=UsuarioSchema)
@@ -1071,385 +1096,46 @@ def confirmar_entrega_repartidor(pedido_id: int, entrega_input: ConfirmarEntrega
     db.commit()
     db.refresh(seguimiento)
     return seguimiento
-
-# ✅ NUEVO: Endpoint para obtener pedidos del usuario actual
-@app.get("/pedidos/mis-pedidos", response_model=List[dict])
-async def mis_pedidos(
-    current_user: UsuarioDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+@app.get("/pedidos", response_model=List[dict])
+async def obtener_pedidos(current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Obtener todos los pedidos del usuario actual
     """
     pedidos = db.query(PedidoDB).filter(PedidoDB.usuario_id == current_user.id).all()
     
-    return [
-        {
-            "id": p.id,
-            "total": p.total,
-            "estado": p.estado.value,
-            "fecha_creacion": p.fecha_creacion.isoformat() if p.fecha_creacion else None,
-            "repartidor_id": p.repartidor_id
-        }
-        for p in pedidos
-    ]
+    # Convertir a diccionario para respuesta
+    result = []
+    for pedido in pedidos:
+        result.append({
+            "id": pedido.id,
+            "usuario_id": pedido.usuario_id,
+            "total": pedido.total,
+            "estado": pedido.estado,
+            "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None,
+            "clientName": current_user.nombre if hasattr(current_user, 'nombre') else "Cliente",
+            "address": current_user.direccion if hasattr(current_user, 'direccion') else "Dirección no especificada",
+            "phone": current_user.telefono if hasattr(current_user, 'telefono') else "No especificado"
+        })
+    
+    return result
 
-# ✅ NUEVO: Endpoint para obtener un pedido específico
 @app.get("/pedidos/{pedido_id}", response_model=dict)
-async def obtener_pedido(
-    pedido_id: int,
-    current_user: UsuarioDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+async def obtener_pedido_por_id(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """
-    Obtener detalles de un pedido específico
+    Obtener un pedido específico por ID
     """
-    pedido = db.query(PedidoDB).filter(PedidoDB.id == pedido_id).first()
+    pedido = db.query(PedidoDB).filter(
+        PedidoDB.id == pedido_id,
+        PedidoDB.usuario_id == current_user.id
+    ).first()
     
     if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    
-    # Verificar que el usuario sea el dueño del pedido o sea admin/repartidor
-    if pedido.usuario_id != current_user.id and current_user.rol not in [Roles.administrador, Roles.repartidor]:
-        raise HTTPException(status_code=403, detail="No tienes permiso para ver este pedido")
     
     return {
         "id": pedido.id,
         "usuario_id": pedido.usuario_id,
-        "repartidor_id": pedido.repartidor_id,
         "total": pedido.total,
-        "estado": pedido.estado.value,
-        "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None,
-        "fecha_entrega": pedido.fecha_entrega.isoformat() if pedido.fecha_entrega else None
+        "estado": pedido.estado,
+        "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None
     }
-
-# ✅ NUEVO: Endpoint para marcar pedido como pagado
-@app.put("/pedidos/{pedido_id}/pagar", response_model=dict)
-async def marcar_pedido_pagado(
-    pedido_id: int,
-    current_user: UsuarioDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Marcar un pedido como pagado (después de procesar el pago)
-    """
-    pedido = db.query(PedidoDB).filter(PedidoDB.id == pedido_id).first()
-    
-    if not pedido:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    
-    # Verificar que el usuario sea el dueño del pedido
-    if pedido.usuario_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No tienes permiso para modificar este pedido")
-    
-    # Cambiar estado a pagado
-    pedido.estado = EstadoPedido.pagado
-    db.commit()
-    db.refresh(pedido)
-    
-    return {
-        "ok": True,
-        "pedido_id": pedido.id,
-        "nuevo_estado": pedido.estado.value,
-        "mensaje": f"Pedido {pedido.id} marcado como pagado"
-    }
-
-# ✅ NUEVO: Endpoint para enviar boleta/factura por email
-@app.post("/documentos/enviar-email")
-async def enviar_documento_email(
-    pedido_data: dict,
-    current_user: UsuarioDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Enviar boleta o factura por email al usuario
-    """
-    pedido_id = pedido_data.get("pedido_id")
-    
-    if not pedido_id:
-        raise HTTPException(status_code=400, detail="pedido_id es requerido")
-    
-    pedido = db.query(PedidoDB).filter(PedidoDB.id == pedido_id).first()
-    if not pedido:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    
-    # Verificar que el usuario sea el dueño del pedido
-    if pedido.usuario_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No tienes permiso para este pedido")
-    
-    try:
-        # Obtener datos del usuario
-        usuario = current_user
-        
-        # Generar contenido del email
-        fecha = pedido.fecha_creacion.strftime("%d-%m-%Y") if pedido.fecha_creacion else "N/A"
-        total = f"${pedido.total:,.0f}".replace(",", ".")
-        
-        html_content = f"""
-        <html>
-            <body style="font-family: Arial, sans-serif; background-color: #f8f9fa; padding: 20px;">
-                <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                    <!-- Header -->
-                    <div style="background: linear-gradient(135deg, #7B3F00, #A0522D); color: white; padding: 20px; text-align: center;">
-                        <h1 style="margin: 0; font-size: 1.8rem;">CHOCOMANÍA</h1>
-                        <p style="margin: 5px 0 0 0;">Chocolatería Artesanal</p>
-                    </div>
-                    
-                    <!-- Contenido -->
-                    <div style="padding: 30px;">
-                        <h2 style="color: #7B3F00; margin-bottom: 20px;">¡Hola {usuario.nombre or usuario.email}!</h2>
-                        
-                        <p style="color: #333; line-height: 1.6;">
-                            Adjuntamos tu <strong>boleta digital</strong> correspondiente a la compra realizada en Chocomanía.
-                        </p>
-                        
-                        <!-- Detalles del pedido -->
-                        <div style="background: #f8f9fa; border-left: 4px solid #FFB300; padding: 15px; margin: 20px 0; border-radius: 5px;">
-                            <h4 style="color: #7B3F00; margin-top: 0;">Detalles de tu Pedido:</h4>
-                            <p style="margin: 5px 0;"><strong>N° Pedido:</strong> #{pedido.id}</p>
-                            <p style="margin: 5px 0;"><strong>Fecha:</strong> {fecha}</p>
-                            <p style="margin: 5px 0;"><strong>Total:</strong> {total}</p>
-                            <p style="margin: 5px 0;"><strong>Estado:</strong> <span style="background: #d4edda; color: #155724; padding: 3px 8px; border-radius: 12px; font-size: 0.9rem;">PAGADO</span></p>
-                        </div>
-                        
-                        <p style="color: #666; font-size: 0.9rem;">
-                            Este documento es válido para todos los efectos tributarios. 
-                            <br>¡Gracias por tu compra!
-                        </p>
-                        
-                        <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
-                            <p style="color: #666; font-size: 0.85rem; margin: 5px 0;">
-                                Equipo de Chocomanía<br>
-                                contacto@chocomania.cl | +56 2 2123 4567
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </body>
-        </html>
-        """
-        
-        # Crear mensaje de email
-        message = MessageSchema(
-            subject="🍫 Tu Boleta Chocomanía - Pedido #" + str(pedido.id),
-            recipients=[usuario.email],
-            html=html_content
-        )
-        
-        # Enviar email
-        fm = FastMail(conf)
-        await fm.send_message(message)
-        
-        print(f"✅ Email enviado a {usuario.email}")
-        
-        return {
-            "ok": True,
-            "mensaje": f"Boleta enviada a {usuario.email}",
-            "email": usuario.email
-        }
-    
-    except Exception as e:
-        print(f"❌ Error enviando email: {e}")
-        return {
-            "ok": False,
-            "mensaje": "Error al enviar email. Intenta más tarde.",
-            "error": str(e)
-        }
-
-# ✅ NUEVO: Endpoint para descargar boleta en PDF
-@app.get("/documentos/descargar-boleta/{pedido_id}")
-async def descargar_boleta(
-    pedido_id: int,
-    current_user: UsuarioDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Descargar boleta en formato PDF
-    """
-    pedido = db.query(PedidoDB).filter(PedidoDB.id == pedido_id).first()
-    if not pedido:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    
-    # Verificar que el usuario sea el dueño del pedido
-    if pedido.usuario_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No tienes permiso para este pedido")
-    
-    try:
-        from reportlab.lib.pagesizes import letter
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import inch
-        from reportlab.lib import colors
-        from io import BytesIO
-        
-        # Crear PDF en memoria
-        pdf_buffer = BytesIO()
-        doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
-        
-        # Estilos
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#7B3F00'),
-            spaceAfter=12,
-            alignment=1  # CENTER
-        )
-        
-        # Contenido del PDF
-        story = []
-        
-        # Título
-        story.append(Paragraph("CHOCOMANÍA", title_style))
-        story.append(Paragraph("Chocolatería Artesanal", styles['Heading3']))
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Datos del pedido
-        data = [
-            ['BOLETA DE VENTA', ''],
-            ['N° Pedido:', f"#{pedido.id}"],
-            ['Fecha:', pedido.fecha_creacion.strftime("%d-%m-%Y") if pedido.fecha_creacion else "N/A"],
-            ['Cliente:', current_user.nombre or current_user.email],
-            ['Email:', current_user.email],
-            ['Dirección:', current_user.direccion or "No registrada"],
-        ]
-        
-        table = Table(data)
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#7B3F00')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 14),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('GRID', (0, 0), (-1, -1), 1, colors.grey)
-        ]))
-        
-        story.append(table)
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Total
-        total_data = [
-            ['TOTAL A PAGAR:', f"${pedido.total:,.0f}"],
-        ]
-        total_table = Table(total_data)
-        total_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d4edda')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#155724')),
-            ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('PADDING', (0, 0), (-1, -1), 10),
-        ]))
-        
-        story.append(total_table)
-        story.append(Spacer(1, 0.5*inch))
-        
-        # Pie
-        story.append(Paragraph(
-            "Este documento es válido para todos los efectos tributarios.<br/>"
-            "Gracias por tu compra en Chocomanía",
-            styles['Normal']
-        ))
-        
-        # Generar PDF
-        doc.build(story)
-        pdf_buffer.seek(0)
-        
-        # Retornar como descarga
-        return StreamingResponse(
-            iter([pdf_buffer.getvalue()]),
-            media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename=Boleta_Chocomania_B{pedido.id:06d}.pdf"}
-        )
-    
-    except Exception as e:
-        print(f"Error generando PDF: {e}")
-        raise HTTPException(status_code=500, detail="Error al generar PDF")
-
-# ✅ VERIFICAR: Endpoint para crear pedido desde carrito
-@app.post("/pedidos/crear-pago-desde-carrito", response_model=dict)
-async def crear_pedido_desde_carrito(
-    current_user: UsuarioDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Crear un nuevo pedido a partir del carrito del usuario actual
-    """
-    try:
-        print(f"🔵 Creando pedido para usuario: {current_user.id}")
-        
-        # Obtener carrito del usuario
-        carrito = db.query(CarritoDB).filter(CarritoDB.usuario_id == current_user.id).first()
-        
-        if not carrito:
-            print(f"❌ No hay carrito para usuario {current_user.id}")
-            raise HTTPException(status_code=400, detail="El carrito está vacío")
-        
-        # Obtener items del carrito
-        carrito_items = db.query(CarritoItemDB).filter(CarritoItemDB.carrito_id == carrito.id).all()
-        
-        print(f"📦 Items en carrito: {len(carrito_items)}")
-        
-        if not carrito_items or len(carrito_items) == 0:
-            raise HTTPException(status_code=400, detail="No hay productos en el carrito")
-        
-        # Calcular total
-        total = 0
-        for item in carrito_items:
-            if item.producto:
-                total += item.cantidad * item.producto.precio
-                print(f"  - {item.producto.nombre}: {item.cantidad} x ${item.producto.precio}")
-        
-        print(f"💰 Total calculado: ${total}")
-        
-        if total <= 0:
-            raise HTTPException(status_code=400, detail="El total debe ser mayor a 0")
-        
-        # Crear pedido
-        nuevo_pedido = PedidoDB(
-            usuario_id=current_user.id,
-            total=total,
-            estado=EstadoPedido.pendiente_de_pago,
-            fecha_creacion=datetime.now(timezone.utc)
-        )
-        
-        db.add(nuevo_pedido)
-        db.flush()  # Obtener el ID del pedido antes de commit
-        
-        print(f"✅ Pedido creado con ID: {nuevo_pedido.id}")
-        
-        # Asociar productos al pedido
-        for item in carrito_items:
-            db.execute(
-                pedido_items_tabla.insert().values(
-                    pedido_id=nuevo_pedido.id,
-                    producto_id=item.producto_id,
-                    cantidad=item.cantidad,
-                    precio_en_el_momento=item.producto.precio if item.producto else 0
-                )
-            )
-        
-        # Vaciar carrito después de crear el pedido
-        db.query(CarritoItemDB).filter(CarritoItemDB.carrito_id == carrito.id).delete()
-        
-        db.commit()
-        db.refresh(nuevo_pedido)
-        
-        print(f"✅ Pedido #{nuevo_pedido.id} creado exitosamente - Total: ${nuevo_pedido.total}")
-        
-        return {
-            "ok": True,
-            "pedido_id": nuevo_pedido.id,
-            "total": nuevo_pedido.total,
-            "estado": nuevo_pedido.estado.value,
-            "mensaje": f"Pedido #{nuevo_pedido.id} creado exitosamente"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        print(f"❌ Error creando pedido: {e}")
-        raise HTTPException(status_code=500, detail=f"Error al crear pedido: {str(e)}")
