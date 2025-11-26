@@ -250,6 +250,7 @@
         </div>
     </div>
 
+    <script src="config.js"></script>
     <script>
         // Referencias DOM
         const cartItemsContainer = document.getElementById('cartItems');
@@ -346,45 +347,68 @@
             }
         };
 
-        // --- CONFIRMAR PEDIDO ---
+        // --- 3. CONFIRMAR PEDIDO (CORREGIDO) ---
         document.getElementById('confirmOrderBtn').onclick = async function() {
             const token = localStorage.getItem('token');
-            if (!token) { alert("Debes iniciar sesión"); window.location.href = "Inicio.html"; return; }
+            if (!token) { 
+                alert("Debes iniciar sesión"); 
+                window.location.href = "Inicio.html"; 
+                return; 
+            }
 
             const cart = getLocalCart();
-            if(cart.length === 0) return alert("El carrito está vacío");
+            if(cart.length === 0) {
+                alert("El carrito está vacío");
+                return;
+            }
 
+            // ✅ PASO 1: Guardar datos para ConfirmacionPedido.html
             const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-            
-            // Obtenemos el nombre actual del label para guardarlo en el pedido
-            const customerName = document.getElementById('clienteNombre').textContent;
-
             const orderData = { 
                 items: cart, 
-                total: total, 
-                customer: customerName // Guardamos el nombre real aquí
+                total: total,
+                date: new Date().toLocaleDateString('es-CL')
             };
             localStorage.setItem('pendingOrder', JSON.stringify(orderData));
+            console.log("✅ Datos guardados en localStorage:", orderData);
 
             const btn = this;
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Guardando...';
 
             try {
-                await fetch(`${API_URL}/carrito`, { method: 'DELETE', headers: getAuthHeaders() });
+                // ✅ PASO 2: Limpiar carrito en backend ANTES de crear pedido
+                await fetch(`${API_URL}/carrito`, { 
+                    method: 'DELETE', 
+                    headers: getAuthHeaders() 
+                }).catch(() => {
+                    console.warn("⚠️ No se pudo limpiar carrito en backend");
+                });
+
+                // ✅ PASO 3: Agregar items al carrito en backend (para que el pedido se cree con datos)
                 for (const item of cart) {
                     await fetch(`${API_URL}/carrito/items`, {
                         method: 'POST',
                         headers: getAuthHeaders(),
-                        body: JSON.stringify({ producto_id: item.id, cantidad: item.quantity })
-                    });
+                        body: JSON.stringify({ 
+                            producto_id: item.id, 
+                            cantidad: item.quantity 
+                        })
+                    }).catch(err => console.warn("⚠️ Error agregando item:", err));
                 }
-                window.location.href = 'ConfirmacionPedido.html';
+
+                console.log("✅ Carrito sincronizado con backend");
+
+                // ✅ PASO 4: Ir a ConfirmacionPedido.html
+                setTimeout(() => {
+                    window.location.href = 'ConfirmacionPedido.html';
+                }, 500);
+
             } catch (error) {
-                console.error(error);
+                console.error("❌ Error:", error);
                 alert("Error de conexión");
                 btn.disabled = false;
-                btn.innerHTML = 'Confirmar Pedido';
+                btn.innerHTML = '<i class="fas fa-check me-2"></i>Confirmar Pedido';
             }
         };
 
@@ -396,7 +420,7 @@
 
         // INICIALIZAR
         loadUserData(); // <-- ESTO CARGA TU NOMBRE
-        renderCart();   // <-- ESTO MUESTRA LOS PRODUCTOS
+        renderCart();
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
