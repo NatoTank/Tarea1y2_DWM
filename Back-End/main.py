@@ -1195,84 +1195,6 @@ def marcar_pedido_en_camino(
         "pedido_id": pedido_id
     }
 
-# --- ENDPOINTS DE SEGUIMIENTO ---
-@app.get("/seguimiento/{pedido_id}", response_model=dict)
-def obtener_seguimiento_cliente(pedido_id: int, current_user: UsuarioDB = Depends(get_current_user), db: Session = Depends(get_db)):
-    pedido = get_pedido_by_id(db, pedido_id)
-    if not pedido:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    
-    # Permitir acceso si es el dueño, repartidor o admin
-    if pedido.usuario_id != current_user.id and current_user.rol not in [Roles.repartidor, Roles.administrador]:
-        raise HTTPException(status_code=403, detail="No tienes permiso para ver este seguimiento")
-    
-    seguimiento = get_seguimiento_by_pedido_id(db, pedido_id)
-    
-    # Si no hay seguimiento, crear uno automáticamente para pedidos pagados
-    if not seguimiento:
-        if pedido.estado in [EstadoPedido.pagado, EstadoPedido.en_preparacion, EstadoPedido.despachado]:
-            # ✅ Generar ubicación fija basada en el ID del pedido
-            base_lat = -33.45 + (pedido_id % 10) * 0.001
-            base_lng = -70.65 + (pedido_id % 10) * 0.001
-            
-            seguimiento = SeguimientoDB(
-                pedido_id=pedido.id,
-                estado=EstadoSeguimiento.en_camino,
-                hora_estimada_llegada=(datetime.now(timezone.utc) + timedelta(hours=1)).time().isoformat(),
-                lat=base_lat,
-                lng=base_lng
-            )
-            db.add(seguimiento)
-            db.commit()
-            db.refresh(seguimiento)
-        else:
-            raise HTTPException(status_code=404, detail="Seguimiento no iniciado para este pedido")
-    
-    # ✅ Solo actualizar ubicación si no existe (simular movimiento gradual)
-    if seguimiento.estado == EstadoSeguimiento.en_camino:
-        if seguimiento.lat is None or seguimiento.lng is None:
-            # Ubicación inicial basada en ID
-            seguimiento.lat = -33.45 + (pedido_id % 10) * 0.001
-            seguimiento.lng = -70.65 + (pedido_id % 10) * 0.001
-        else:
-            # Simular pequeño movimiento (no random completo)
-            seguimiento.lat += random.uniform(-0.0005, 0.0005)
-            seguimiento.lng += random.uniform(-0.0005, 0.0005)
-        db.commit()
-        db.refresh(seguimiento)
-    
-    return {
-        "pedido_id": seguimiento.pedido_id,
-        "estado": seguimiento.estado.value,
-        "hora_estimada_llegada": seguimiento.hora_estimada_llegada,
-        "repartidor_asignado": seguimiento.repartidor_asignado,
-        "ubicacion_actual": {
-            "lat": seguimiento.lat,
-            "lng": seguimiento.lng
-        } if seguimiento.lat and seguimiento.lng else None
-    }
-
-@app.put("/seguimiento/{pedido_id}/entregar", response_model=SeguimientoSchema)
-def confirmar_entrega_repartidor(pedido_id: int, entrega_input: ConfirmarEntregaInput, repartidor: UsuarioDB = Depends(get_current_repartidor_user), db: Session = Depends(get_db)):
-    seguimiento = get_seguimiento_by_pedido_id(db, pedido_id)
-    if not seguimiento:
-        raise HTTPException(status_code=404, detail="Seguimiento no encontrado")
-    if seguimiento.estado == EstadoSeguimiento.entregado:
-        raise HTTPException(status_code=400, detail="El pedido ya fue marcado como entregado")
-    
-    seguimiento.estado = EstadoSeguimiento.entregado
-    seguimiento.lat = None
-    seguimiento.lng = None
-    
-    pedido = get_pedido_by_id(db, pedido_id)
-    if pedido:
-        pedido.estado = EstadoPedido.entregado
-        print(f"Pedido {pedido_id} marcado como Entregado por Repartidor {repartidor.email}.")
-    
-    db.commit()
-    db.refresh(seguimiento)
-    return seguimiento
-
 # ============================================
 # ✅ ENDPOINTS DE PEDIDOS (SIN DUPLICADOS)
 # ============================================
@@ -1383,3 +1305,253 @@ async def obtener_pedidos(current_user: UsuarioDB = Depends(get_current_user), d
         })
     
     return result
+
+# ✅ AGREGAR IMPORTS PARA PDF
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from io import BytesIO
+
+# ============================================
+# ✅ ENDPOINTS DE DOCUMENTOS TRIBUTARIOS
+# ============================================
+
+@app.get("/documentos/descargar-boleta/{pedido_id}")
+async def descargar_boleta_pdf(
+    pedido_id: int,
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Genera y descarga una boleta en PDF para un pedido.
+    """
+    # Verificar que el pedido pertenece al usuario
+    pedido = get_pedido_by_id(db, pedido_id)
+    if not pedido or pedido.usuario_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    # Buscar documento
+    documento = db.query(DocumentoDB).filter(DocumentoDB.pedido_id == pedido_id).first()
+    if not documento:
+        # Crear documento si no existe
+        documento = DocumentoDB(
+            pedido_id=pedido_id,
+            tipo=TipoDocumento.boleta,
+            total=pedido.total
+        )
+        db.add(documento)
+        db.commit()
+        db.refresh(documento)
+    
+    # Generar PDF
+    buffer = BytesIO()
+    pdf = SimpleDocTemplate(buffer, pagesize=letter)
+    
+    # Estilos
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#7B3F00'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    # Contenido
+    story = []
+    
+    # Título
+    story.append(Paragraph("CHOCOMANÍA", title_style))
+    story.append(Paragraph("Chocolatería Artesanal", styles['Normal']))
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Tipo de documento
+    doc_title = "BOLETA ELECTRÓNICA" if documento.tipo == TipoDocumento.boleta else "FACTURA ELECTRÓNICA"
+    story.append(Paragraph(doc_title, styles['Heading2']))
+    story.append(Paragraph(f"N° B001-{pedido_id:06d}", styles['Normal']))
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Datos del cliente
+    data = [
+        ['DATOS DEL CLIENTE', ''],
+        ['Nombre:', current_user.nombre or current_user.email],
+        ['Email:', current_user.email],
+        ['Dirección:', current_user.direccion or 'No especificada'],
+        ['Teléfono:', current_user.telefono or 'No especificado'],
+        ['', ''],
+        ['DETALLES DEL PEDIDO', ''],
+        ['N° Pedido:', f'#{pedido_id}'],
+        ['Fecha:', pedido.fecha_creacion.strftime('%d/%m/%Y %H:%M') if pedido.fecha_creacion else 'N/A'],
+        ['Estado:', pedido.estado.value],
+    ]
+    
+    # Si es factura, agregar datos tributarios
+    if documento.tipo == TipoDocumento.factura and documento.rut:
+        data.insert(2, ['RUT:', documento.rut])
+        data.insert(3, ['Razón Social:', documento.razon_social or ''])
+    
+    # Calcular desglose
+    if documento.tipo == TipoDocumento.factura:
+        neto = round(pedido.total / 1.19)
+        iva = pedido.total - neto
+        data.extend([
+            ['', ''],
+            ['DESGLOSE', ''],
+            ['Neto:', f'${neto:,.0f}'],
+            ['IVA (19%):', f'${iva:,.0f}'],
+            ['TOTAL:', f'${pedido.total:,.0f}'],
+        ])
+    else:
+        data.extend([
+            ['', ''],
+            ['TOTAL:', f'${pedido.total:,.0f}'],
+        ])
+    
+    # Crear tabla
+    table = Table(data, colWidths=[2.5*inch, 4*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#7B3F00')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, -1), (-1, -1), 14),
+    ]))
+    
+    story.append(table)
+    story.append(Spacer(1, 0.5*inch))
+    story.append(Paragraph("Este documento es válido para todos los efectos tributarios.", styles['Italic']))
+    story.append(Paragraph("¡Gracias por tu compra!", styles['Normal']))
+    
+    # Construir PDF
+    pdf.build(story)
+    buffer.seek(0)
+    
+    # Retornar como descarga
+    filename = f"Boleta_Chocomania_B{pedido_id:06d}.pdf" if documento.tipo == TipoDocumento.boleta else f"Factura_Chocomania_F{pedido_id:06d}.pdf"
+    
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@app.post("/documentos/enviar-email", response_model=dict)
+async def enviar_documento_por_email(
+    pedido_id: int,
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Envía la boleta/factura por email al cliente.
+    """
+    print(f"📧 Enviando documento para pedido ID: {pedido_id} a usuario: {current_user.email}")
+    
+    # Verificar pedido
+    pedido = get_pedido_by_id(db, pedido_id)
+    if not pedido:
+        print(f"❌ Pedido {pedido_id} no encontrado en BD")
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    if pedido.usuario_id != current_user.id:
+        print(f"❌ Pedido {pedido_id} no pertenece al usuario {current_user.id}")
+        raise HTTPException(status_code=403, detail="No tienes permiso para este pedido")
+    
+    # Buscar documento
+    documento = db.query(DocumentoDB).filter(DocumentoDB.pedido_id == pedido_id).first()
+    if not documento:
+        # ✅ Crear documento si no existe
+        print(f"⚠️ Documento no encontrado, creando uno nuevo para pedido {pedido_id}")
+        documento = DocumentoDB(
+            pedido_id=pedido_id,
+            tipo=TipoDocumento.boleta,
+            total=pedido.total
+        )
+        db.add(documento)
+        db.commit()
+        db.refresh(documento)
+    
+    # ✅ OBTENER NOMBRE CORRECTO DEL CLIENTE
+    nombre_cliente = current_user.nombre if current_user.nombre else current_user.email.split('@')[0]
+    
+    # Preparar email
+    doc_tipo = "Boleta" if documento.tipo == TipoDocumento.boleta else "Factura"
+    
+    cuerpo_html = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; background-color: #f8f9fa; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <div style="text-align: center; margin-bottom: 30px;">
+                <h1 style="color: #7B3F00; margin-bottom: 10px;">Chocomanía</h1>
+                <p style="color: #666;">Chocolatería Artesanal</p>
+            </div>
+            
+            <h2 style="color: #7B3F00;">{doc_tipo} - Chocomanía</h2>
+            <hr style="border: 1px solid #ddd;">
+            
+            <p><strong>Hola {nombre_cliente},</strong></p>
+            <p>Adjuntamos tu {doc_tipo} digital correspondiente a la compra realizada.</p>
+            
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                <h3 style="color: #7B3F00; margin-top: 0;">Detalles de la {doc_tipo.lower()}:</h3>
+                <ul style="list-style: none; padding: 0;">
+                    <li><strong>N° Pedido:</strong> #{pedido_id}</li>
+                    <li><strong>Fecha:</strong> {pedido.fecha_creacion.strftime('%d/%m/%Y %H:%M') if pedido.fecha_creacion else 'N/A'}</li>
+                    <li><strong>Total:</strong> ${pedido.total:,.0f}</li>
+    """
+    
+    if documento.tipo == TipoDocumento.factura and documento.rut:
+        neto = round(pedido.total / 1.19)
+        iva = pedido.total - neto
+        cuerpo_html += f"""
+                    <li><strong>RUT:</strong> {documento.rut}</li>
+                    <li><strong>Razón Social:</strong> {documento.razon_social}</li>
+                    <li><strong>Neto:</strong> ${neto:,.0f}</li>
+                    <li><strong>IVA (19%):</strong> ${iva:,.0f}</li>
+        """
+    
+    cuerpo_html += f"""
+                </ul>
+            </div>
+            
+            <div style="background: #e7f3ff; border-left: 4px solid #007bff; padding: 15px, margin: 20px 0;">
+                <p style="margin: 0;"><strong>📄 {doc_tipo}_Chocomania_{'B' if documento.tipo == TipoDocumento.boleta else 'F'}{pedido_id:06d}.pdf</strong></p>
+                <small style="color: #666;">(Documento tributario electrónico)</small>
+            </div>
+            
+            <p><em>Este documento es válido para todos los efectos tributarios.</em></p>
+            
+            <p style="margin-top: 30px;"><strong>¡Gracias por tu compra!</strong></p>
+            <p style="color: #666;"><em>Equipo Chocomanía</em></p>
+            
+            <hr style="border: 1px solid #ddd; margin-top: 30px;">
+            <p style="text-align: center; color: #999; font-size: 12px;">
+                www.chocomania.cl | contacto@chocomania.cl<br>
+                Av. Chocolate 123, Santiago
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Enviar email
+    await enviar_email_async(
+        asunto=f"{doc_tipo} Chocomanía - Pedido #{pedido_id}",
+        email_destinatario=current_user.email,
+        cuerpo_html=cuerpo_html
+    )
+    
+    print(f"✅ Email enviado exitosamente a {current_user.email}")
+    
+    return {
+        "mensaje": f"{doc_tipo} enviada exitosamente",
+        "email": current_user.email,
+        "pedido_id": pedido_id
+    }

@@ -112,6 +112,19 @@
     </style>
 </head>
 <body>
+    <!-- ✅ AGREGAR: Navegación superior -->
+    <div class="container mt-3 mb-3">
+        <div class="d-flex justify-content-between align-items-center">
+            <a href="Home.html" class="btn btn-outline-secondary">
+                <i class="fas fa-home me-2"></i>Inicio
+            </a>
+            <h5 class="mb-0 text-muted">Documento Generado</h5>
+            <a href="CancelacionPedido.html" class="btn btn-outline-secondary">
+                <i class="fas fa-list me-2"></i>Mis Pedidos
+            </a>
+        </div>
+    </div>
+
     <!-- Header -->
     <div class="choco-header text-center">
         <div class="container">
@@ -226,74 +239,133 @@
             // 1. Obtener preferencias de documento
             const docData = JSON.parse(localStorage.getItem('documento_data')) || { type: 'boleta' };
             
-            // Ajustar textos según Boleta o Factura
+            // 2. ✅ Obtener ID de MÚLTIPLES fuentes
+            let pedidoId = sessionStorage.getItem('lastCreatedOrderId');
+            
+            if (!pedidoId) {
+                pedidoId = sessionStorage.getItem('currentPaymentOrderId');
+            }
+            
+            if (!pedidoId && docData.orderId) {
+                pedidoId = docData.orderId;
+            }
+            
+            if (!pedidoId) {
+                const params = new URLSearchParams(window.location.search);
+                pedidoId = params.get('order_id');
+            }
+            
+            console.log("🔍 Buscando ID del pedido...");
+            console.log("  - sessionStorage.lastCreatedOrderId:", sessionStorage.getItem('lastCreatedOrderId'));
+            console.log("  - sessionStorage.currentPaymentOrderId:", sessionStorage.getItem('currentPaymentOrderId'));
+            console.log("  - docData.orderId:", docData.orderId);
+            console.log("  - URL order_id:", new URLSearchParams(window.location.search).get('order_id'));
+            console.log("  ✅ ID FINAL:", pedidoId);
+            
+            if (!pedidoId) {
+                console.error("❌ No se encontró ID del pedido en ninguna fuente");
+                alert("Error: No se encontró información del pedido. Redirigiendo a tus pedidos...");
+                window.location.href = "CancelacionPedido.html";
+                return;
+            }
+
+            // ✅ Guardar en variable global
+            window.currentPedidoId = pedidoId;
+            
+            // ✅ Volver a guardar para asegurar persistencia
+            sessionStorage.setItem('lastCreatedOrderId', pedidoId);
+
+            console.log("✅ Pedido ID confirmado:", pedidoId, "Tipo:", docData.type);
+
+            // Si es factura, enviar datos al backend
             if (docData.type === 'factura') {
+                try {
+                    const response = await fetch(`${API_URL}/pedidos/${pedidoId}/solicitar-factura`, {
+                        method: 'POST',
+                        headers: getAuthHeaders(),
+                        body: JSON.stringify({
+                            rut: docData.rut,
+                            razon_social: docData.razon_social
+                        })
+                    });
+
+                    if (response.ok) {
+                        console.log("✅ Factura solicitada correctamente");
+                    } else {
+                        console.error("Error solicitando factura:", response.status);
+                    }
+                } catch (error) {
+                    console.error("Error solicitando factura:", error);
+                }
+
+                // Ajustar UI para factura
                 document.getElementById('successTitle').textContent = "FACTURA EMITIDA";
                 document.getElementById('documentTypeText').textContent = "Factura Electrónica Generada";
-                document.getElementById('documentTitle').textContent = "Factura N° 7749";
+                document.getElementById('documentTitle').textContent = `Factura N° F001-${pedidoId}`;
                 document.getElementById('documentDescription').textContent = "Factura válida para crédito fiscal IVA.";
                 document.getElementById('invoiceDetails').style.display = 'block';
                 document.getElementById('emailDocType').textContent = "Factura";
-                document.getElementById('emailFileName').textContent = "Factura_Chocomania.pdf";
+                document.getElementById('documentFileName').textContent = `Factura_Chocomania_F${pedidoId}.pdf`;
+                document.getElementById('emailFileName').textContent = `Factura_Chocomania_F${pedidoId}.pdf`;
+                document.getElementById('downloadButtonText').textContent = "Descargar Factura PDF";
             }
 
-            // 2. Obtener la ÚLTIMA COMPRA desde el Backend
+            // 3. Cargar datos del pedido
             try {
-                const response = await fetch(`${API_URL}/pedidos/mis-pedidos`, {
+                const response = await fetch(`${API_URL}/pedidos/${pedidoId}`, {
                     headers: getAuthHeaders()
                 });
                 
                 if (response.ok) {
-                    const orders = await response.json();
+                    const pedido = await response.json();
                     
-                    if (orders.length > 0) {
-                        orders.sort((a, b) => new Date(b.fecha_creacion) - new Date(a.fecha_creacion));
-                        const lastOrder = orders[0];
+                    const fecha = pedido.fecha_creacion ? new Date(pedido.fecha_creacion).toLocaleDateString('es-CL') : 'N/A';
+                    const total = pedido.total || 0;
+                    const neto = Math.round(total / 1.19);
+                    const iva = total - neto;
 
-                        const fecha = new Date(lastOrder.fecha_creacion).toLocaleDateString('es-CL');
-                        const total = lastOrder.total;
-                        const neto = Math.round(total / 1.19);
-                        const iva = total - neto;
+                    let detallesHTML = `
+                        <p><strong>N° Pedido:</strong> #${pedidoId}</p>
+                        <p><strong>Fecha:</strong> ${fecha}</p>
+                        <p><strong>Total Pagado:</strong> $${total.toLocaleString('es-CL')}</p>
+                    `;
 
-                        let detallesHTML = `
-                            <p><strong>N° Pedido:</strong> ${lastOrder.id}</p>
-                            <p><strong>Fecha:</strong> ${fecha}</p>
-                            <p><strong>Total Pagado:</strong> $${total.toLocaleString('es-CL')}</p>
+                    if (docData.type === 'factura') {
+                        detallesHTML += `
+                            <p><strong>RUT:</strong> ${docData.rut || 'No especificado'}</p>
+                            <p><strong>Razón Social:</strong> ${docData.razon_social || 'No especificado'}</p>
                         `;
-
-                        if (docData.type === 'factura') {
-                            detallesHTML += `
-                                <p><strong>RUT:</strong> ${docData.rut || '12.345.678-9'}</p>
-                                <p><strong>Razón Social:</strong> ${docData.razon_social || 'EMPRESA XYZ'}</p>
-                                <p><strong>Dirección:</strong> ${docData.direccion || 'Av. Principal 123'}</p>
-                            `;
-                            document.getElementById('neto').textContent = `$${neto.toLocaleString('es-CL')}`;
-                            document.getElementById('iva').textContent = `$${iva.toLocaleString('es-CL')}`;
-                            document.getElementById('totalFact').textContent = `$${total.toLocaleString('es-CL')}`;
-                        }
-
-                        document.getElementById('documentDetails').innerHTML = detallesHTML;
-                        document.getElementById('emailDetails').innerHTML = detallesHTML.replace(/<p>/g, '<li>').replace(/<\/p>/g, '</li>');
+                        document.getElementById('neto').textContent = `$${neto.toLocaleString('es-CL')}`;
+                        document.getElementById('iva').textContent = `$${iva.toLocaleString('es-CL')}`;
+                        document.getElementById('totalFact').textContent = `$${total.toLocaleString('es-CL')}`;
                     }
+
+                    document.getElementById('documentDetails').innerHTML = detallesHTML;
+                    document.getElementById('emailDetails').innerHTML = detallesHTML.replace(/<p>/g, '<li>').replace(/<\/p>/g, '</li>');
+                } else {
+                    console.error("Error obteniendo pedido:", response.status);
+                    const error = await response.json();
+                    console.error("Detalle del error:", error);
                 }
             } catch (error) {
-                console.error(error);
+                console.error("Error:", error);
             }
         });
 
+        // ✅ DESCARGAR PDF
         window.downloadReceipt = async function() {
             const token = localStorage.getItem('token');
             if (!token) return alert("Debes iniciar sesión");
 
-            // ✅ CORREGIDO: Obtener ID desde sessionStorage
-            const pedidoId = sessionStorage.getItem('lastCreatedOrderId');
+            const pedidoId = window.currentPedidoId || sessionStorage.getItem('lastCreatedOrderId') || sessionStorage.getItem('currentPaymentOrderId');
             
             if (!pedidoId) {
-                console.error("ID no encontrado en sessionStorage");
-                return alert("No se encontró el ID del pedido");
+                alert("❌ Error: No se encontró el ID del pedido");
+                console.error("pedidoId no disponible");
+                return;
             }
 
-            console.log("Descargando boleta para pedido:", pedidoId);
+            console.log("📥 Descargando documento para pedido:", pedidoId);
 
             try {
                 const response = await fetch(`${API_URL}/documentos/descargar-boleta/${pedidoId}`, {
@@ -305,57 +377,80 @@
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `Boleta_Chocomania_B${pedidoId}.pdf`;
+                    
+                    const docData = JSON.parse(localStorage.getItem('documento_data')) || { type: 'boleta' };
+                    const filename = docData.type === 'factura' 
+                        ? `Factura_Chocomania_F${pedidoId}.pdf`
+                        : `Boleta_Chocomania_B${pedidoId}.pdf`;
+                    
+                    a.download = filename;
                     document.body.appendChild(a);
                     a.click();
                     window.URL.revokeObjectURL(url);
                     document.body.removeChild(a);
-                    alert("¡Boleta descargada exitosamente!");
+                    
+                    alert("✅ Documento descargado exitosamente!");
                 } else {
-                    alert("Error al descargar: " + response.status);
+                    const error = await response.json();
+                    console.error("Error del servidor:", error);
+                    alert(`❌ Error: ${error.detail || "No se pudo descargar"}`);
                 }
             } catch (error) {
-                console.error(error);
-                alert("Error de conexión");
+                console.error("Error de conexión:", error);
+                alert("❌ Error de conexión: " + error.message);
             }
         };
 
+        // ✅ ENVIAR POR EMAIL
         async function enviarBooletaPorEmail() {
             const token = localStorage.getItem('token');
-            if (!token) return;
-
-            // ✅ CORREGIDO: Obtener ID desde sessionStorage
-            const pedidoId = sessionStorage.getItem('lastCreatedOrderId');
-            
-            if (!pedidoId) {
-                console.error("ID no encontrado en sessionStorage");
-                return alert("No se encontró el ID del pedido");
+            if (!token) {
+                alert("Debes iniciar sesión");
+                return;
             }
 
-            console.log("Enviando email para pedido:", pedidoId);
+            const pedidoId = window.currentPedidoId || sessionStorage.getItem('lastCreatedOrderId') || sessionStorage.getItem('currentPaymentOrderId');
+            
+            if (!pedidoId) {
+                alert("❌ Error: No se encontró el ID del pedido");
+                console.error("pedidoId no disponible");
+                return;
+            }
+
+            console.log("📧 Enviando email para pedido:", pedidoId);
+
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enviando...';
 
             try {
-                const response = await fetch(`${API_URL}/documentos/enviar-email`, {
+                const response = await fetch(`${API_URL}/documentos/enviar-email?pedido_id=${pedidoId}`, {
                     method: 'POST',
-                    headers: getAuthHeaders(),
-                    body: JSON.stringify({ pedido_id: parseInt(pedidoId) })
+                    headers: getAuthHeaders()
                 });
 
                 if (response.ok) {
                     const result = await response.json();
-                    alert(`✅ Boleta enviada a ${result.email}`);
-                    console.log("Email enviado correctamente");
+                    alert(`✅ Documento enviado exitosamente a ${result.email}`);
                 } else {
                     const error = await response.json();
-                    alert(`Error: ${error.detail || "No se pudo enviar el email"}`);
+                    console.error("Error del servidor:", error);
+                    alert(`❌ Error: ${error.detail || "No se pudo enviar"}`);
                 }
             } catch (error) {
-                console.error(error);
-                alert("Error de conexión");
+                console.error("Error de conexión:", error);
+                alert("❌ Error de conexión: " + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-envelope me-2"></i>Enviar por Email';
             }
         }
 
         window.continueShopping = function() {
+            // ✅ Ahora SÍ limpiamos todo
+            sessionStorage.removeItem('lastCreatedOrderId');
+            sessionStorage.removeItem('currentPaymentOrderId');
+            localStorage.removeItem('documento_data');
             window.location.href = "Catalogo.html";
         };
     </script>

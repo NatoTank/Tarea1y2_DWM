@@ -121,6 +121,19 @@
     </style>
 </head>
 <body>
+    <!-- ✅ AGREGAR: Navegación superior -->
+    <div class="container mt-3 mb-3">
+        <div class="d-flex justify-content-between align-items-center">
+            <a href="Home.html" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>Volver al Inicio
+            </a>
+            <h5 class="mb-0 text-muted">Suscripciones</h5>
+            <a href="PromocionesActivas.html" class="btn btn-outline-secondary">
+                <i class="fas fa-tags me-2"></i>Ver Promociones
+            </a>
+        </div>
+    </div>
+
     <!-- Header -->
     <div class="choco-header text-center">
         <div class="container">
@@ -198,22 +211,61 @@
         </div>
     </div>
 
+    <script src="config.js"></script>
     <script>
-        // Datos del usuario (simulados)
-        const userData = {
-            email: "mail@example.com",
-            subscribed: true
-        };
+        let currentUser = null;
 
-        // Elementos del DOM
-        const subscriptionForm = document.getElementById('subscriptionForm');
-        const recibirPromos = document.getElementById('recibirPromos');
-        const emailInput = document.getElementById('email');
-        const unsubscribeBtn = document.getElementById('unsubscribeBtn');
-        const subscriptionStatus = document.getElementById('subscriptionStatus');
+        // Inicializar
+        document.addEventListener('DOMContentLoaded', async function() {
+            const token = localStorage.getItem('token');
+            
+            if (!token) {
+                alert("Debes iniciar sesión para gestionar tus suscripciones");
+                window.location.href = "Inicio.html";
+                return;
+            }
 
-        // Función para actualizar el estado visual de la suscripción
+            // ✅ Cargar datos del usuario desde la API
+            await cargarDatosUsuario();
+        });
+
+        // ✅ Cargar datos del usuario
+        async function cargarDatosUsuario() {
+            try {
+                const response = await fetch(`${API_URL}/usuarios/me`, {
+                    headers: getAuthHeaders()
+                });
+
+                if (response.ok) {
+                    currentUser = await response.json();
+                    console.log("Usuario cargado:", currentUser);
+                    
+                    // ✅ Actualizar UI con el estado REAL del backend
+                    document.getElementById('email').value = currentUser.email;
+                    document.getElementById('email').disabled = true; // No permitir cambio de email
+                    
+                    // ✅ Sincronizar checkbox con el estado del backend
+                    const checkbox = document.getElementById('recibirPromos');
+                    checkbox.checked = currentUser.recibirPromos === true;
+                    
+                    updateSubscriptionStatus(currentUser.recibirPromos);
+                    
+                    console.log("Estado de suscripción:", currentUser.recibirPromos ? "ACTIVA" : "INACTIVA");
+                } else {
+                    alert("Error al cargar datos del usuario");
+                    window.location.href = "Inicio.html";
+                }
+            } catch (error) {
+                console.error("Error:", error);
+                alert("Error de conexión");
+            }
+        }
+
+        // Actualizar estado visual
         function updateSubscriptionStatus(isSubscribed) {
+            const subscriptionStatus = document.getElementById('subscriptionStatus');
+            const recibirPromos = document.getElementById('recibirPromos');
+            
             if (isSubscribed) {
                 subscriptionStatus.className = 'subscription-status status-active';
                 subscriptionStatus.innerHTML = '<i class="fas fa-check-circle me-2"></i>Actualmente estás suscrito a nuestras promociones';
@@ -225,44 +277,129 @@
             }
         }
 
-        // Inicializar
-        document.addEventListener('DOMContentLoaded', function() {
-            // Cargar datos del usuario
-            emailInput.value = userData.email;
-            updateSubscriptionStatus(userData.subscribed);
+        // ✅ Manejar envío del formulario (MEJORADO)
+        document.getElementById('subscriptionForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
             
-            // Manejar envío del formulario
-            subscriptionForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                
-                // Actualizar datos del usuario
-                userData.email = emailInput.value;
-                userData.subscribed = recibirPromos.checked;
-                
-                // Actualizar estado visual
-                updateSubscriptionStatus(userData.subscribed);
-                
-                // Mostrar mensaje de confirmación
-                alert('¡Tus preferencias de suscripción han sido guardadas correctamente!');
-                
-                // En un caso real, aquí enviaríamos los datos al servidor
-                console.log('Datos guardados:', userData);
-            });
+            const btn = e.target.querySelector('button[type="submit"]');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Guardando...';
             
-            // Manejar cancelación de suscripción
-            unsubscribeBtn.addEventListener('click', function() {
-                if (confirm('¿Estás seguro de que deseas cancelar tu suscripción a todas las promociones?')) {
-                    userData.subscribed = false;
-                    updateSubscriptionStatus(false);
-                    alert('Te has desuscrito de nuestras promociones. No recibirás más ofertas por correo.');
+            const isSubscribed = document.getElementById('recibirPromos').checked;
+            
+            console.log("Enviando suscripción:", isSubscribed);
+            console.log("Estado anterior:", currentUser.recibirPromos);
+            
+            try {
+                const response = await fetch(`${API_URL}/usuarios/me/suscripcion`, {
+                    method: 'PUT',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ recibirPromos: isSubscribed })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    currentUser = result;
+                    
+                    console.log("Respuesta del servidor:", result);
+                    
+                    updateSubscriptionStatus(isSubscribed);
+                    
+                    // ✅ Mensaje personalizado según la acción
+                    if (isSubscribed) {
+                        alert('✅ ¡Suscripción activada! Recibirás un email de confirmación con todas las ventajas.');
+                    } else {
+                        alert('✅ Suscripción desactivada. Ya no recibirás promociones por correo.');
+                    }
+                } else {
+                    const error = await response.json();
+                    console.error("Error del servidor:", error);
+                    alert(`❌ Error: ${error.detail || "No se pudo guardar"}`);
+                    
+                    // ✅ Revertir el checkbox al estado anterior
+                    document.getElementById('recibirPromos').checked = currentUser.recibirPromos;
+                    updateSubscriptionStatus(currentUser.recibirPromos);
                 }
-            });
+            } catch (error) {
+                console.error("Error:", error);
+                alert("Error de conexión: " + error.message);
+                
+                // ✅ Revertir el checkbox al estado anterior
+                document.getElementById('recibirPromos').checked = currentUser.recibirPromos;
+                updateSubscriptionStatus(currentUser.recibirPromos);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        });
+
+        // ✅ Cancelar suscripción (MEJORADO)
+        document.getElementById('unsubscribeBtn').addEventListener('click', async function() {
+            // ✅ Verificar si ya está desuscrito
+            if (!currentUser.recibirPromos) {
+                alert('⚠️ Ya estás desuscrito de las promociones.');
+                return;
+            }
             
-            // Manejar cambio del checkbox
-            recibirPromos.addEventListener('change', function() {
-                userData.subscribed = this.checked;
-                updateSubscriptionStatus(userData.subscribed);
-            });
+            if (!confirm('¿Estás seguro de que deseas cancelar tu suscripción a todas las promociones?')) {
+                return;
+            }
+            
+            const originalText = this.innerHTML;
+            this.disabled = true;
+            this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Cancelando...';
+            
+            try {
+                const response = await fetch(`${API_URL}/usuarios/me/suscripcion`, {
+                    method: 'PUT',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ recibirPromos: false })
+                });
+
+                if (response.ok) {
+                    currentUser = await response.json();
+                    
+                    console.log("Suscripción cancelada:", currentUser);
+                    
+                    // ✅ Actualizar checkbox y estado visual
+                    document.getElementById('recibirPromos').checked = false;
+                    updateSubscriptionStatus(false);
+                    
+                    alert('❌ Te has desuscrito de nuestras promociones. Recibirás un email de confirmación.');
+                } else {
+                    const error = await response.json();
+                    console.error("Error del servidor:", error);
+                    alert(`Error: ${error.detail || "No se pudo cancelar"}`);
+                }
+            } catch (error) {
+                console.error("Error:", error);
+                alert("Error de conexión: " + error.message);
+            } finally {
+                this.disabled = false;
+                this.innerHTML = originalText;
+            }
+        });
+
+        // ✅ Cambio del checkbox (MEJORADO)
+        document.getElementById('recibirPromos').addEventListener('change', function() {
+            // Solo actualizar visualmente, NO enviar al servidor
+            updateSubscriptionStatus(this.checked);
+            
+            // ✅ Mostrar hint al usuario
+            if (this.checked !== currentUser.recibirPromos) {
+                const hint = document.getElementById('checkboxHint');
+                if (!hint) {
+                    const hintElement = document.createElement('small');
+                    hintElement.id = 'checkboxHint';
+                    hintElement.className = 'text-warning d-block mt-2';
+                    hintElement.innerHTML = '<i class="fas fa-info-circle me-1"></i>Presiona "Guardar Preferencias" para confirmar el cambio';
+                    this.parentElement.appendChild(hintElement);
+                }
+            } else {
+                const hint = document.getElementById('checkboxHint');
+                if (hint) hint.remove();
+            }
         });
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

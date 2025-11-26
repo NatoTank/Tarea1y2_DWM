@@ -107,28 +107,35 @@
     <script>
         document.addEventListener('DOMContentLoaded', async function() {
             try {
-                // OPCIÓN 1: Obtener ID de sessionStorage
+                // ✅ PASO 1: Intentar obtener ID de múltiples fuentes
                 let orderId = sessionStorage.getItem('lastCreatedOrderId');
                 
-                // OPCIÓN 2: Si no, obtener de URL
                 if (!orderId) {
                     const params = new URLSearchParams(window.location.search);
                     orderId = params.get('order_id');
                 }
-
+                
                 if (!orderId) {
-                    console.warn("No se encontró ID en sessionStorage ni en URL");
-                    orderId = "1";
+                    const pendingOrder = JSON.parse(localStorage.getItem('pendingOrder'));
+                    if (pendingOrder && pendingOrder.id) {
+                        orderId = pendingOrder.id;
+                    }
                 }
 
-                console.log("Procesando pedido ID:", orderId);
+                if (!orderId) {
+                    throw new Error("No se encontró ID del pedido");
+                }
+
+                console.log("✅ ID del pedido encontrado:", orderId);
+
+                // ✅ GUARDAR EN AMBOS LUGARES para asegurar persistencia
+                sessionStorage.setItem('lastCreatedOrderId', orderId);
+                sessionStorage.setItem('currentPaymentOrderId', orderId); // ✅ Backup extra
 
                 // Obtener datos del pedido
                 const response = await fetch(`${API_URL}/pedidos/${orderId}`, {
                     headers: getAuthHeaders()
                 });
-
-                console.log("Status de respuesta:", response.status);
 
                 let currentOrder;
 
@@ -136,8 +143,7 @@
                     currentOrder = await response.json();
                     console.log("Pedido encontrado:", currentOrder);
                 } else if (response.status === 404) {
-                    console.warn("Pedido no encontrado en el servidor, usando datos del localStorage");
-                    
+                    console.warn("Pedido no encontrado, usando datos locales");
                     const pendingOrder = JSON.parse(localStorage.getItem('pendingOrder'));
                     if (pendingOrder) {
                         currentOrder = {
@@ -168,7 +174,6 @@
             
             const total = currentOrder.total || 0;
 
-            // Mostrar datos mientras procesa
             document.getElementById('processingOrderId').textContent = orderId;
             document.getElementById('processingTotal').textContent = typeof total === 'number' 
                 ? total.toLocaleString('es-CL') 
@@ -181,9 +186,6 @@
 
             // Simular procesamiento
             simulatePaymentProcessing(orderId);
-
-            // Limpiar sesión
-            sessionStorage.removeItem('lastCreatedOrderId');
         }
 
         function simulatePaymentProcessing(orderId) {
@@ -198,14 +200,12 @@
                 if (progress >= 100) {
                     clearInterval(interval);
                     setTimeout(() => {
-                        // ✅ AQUÍ MARCAMOS EL PEDIDO COMO PAGADO EN LA API
                         markOrderAsPaid(orderId);
                     }, 500);
                 }
             }, 400);
         }
 
-        // ✅ NUEVA FUNCIÓN: Marcar pedido como pagado
         async function markOrderAsPaid(orderId) {
             try {
                 console.log("Marcando pedido como pagado:", orderId);
@@ -219,29 +219,37 @@
                 if (response.ok) {
                     const result = await response.json();
                     console.log("Pedido marcado como pagado:", result);
-                    
-                    // Mostrar pantalla de confirmación
-                    document.getElementById('processingScreen').style.display = 'none';
-                    document.getElementById('confirmationScreen').style.display = 'block';
-                } else {
-                    console.error("Error marcando pedido como pagado:", response.status);
-                    // Aún así mostrar confirmación visual
-                    document.getElementById('processingScreen').style.display = 'none';
-                    document.getElementById('confirmationScreen').style.display = 'block';
                 }
+
+                // ✅ IMPORTANTE: Volver a guardar el ID antes de mostrar confirmación
+                sessionStorage.setItem('lastCreatedOrderId', orderId);
+                sessionStorage.setItem('currentPaymentOrderId', orderId);
+                
+                document.getElementById('processingScreen').style.display = 'none';
+                document.getElementById('confirmationScreen').style.display = 'block';
+                
             } catch (error) {
                 console.error("Error:", error);
-                // Mostrar confirmación de todas formas
                 document.getElementById('processingScreen').style.display = 'none';
                 document.getElementById('confirmationScreen').style.display = 'block';
             }
         }
 
         function downloadReceipt() {
+            // ✅ Verificar que tengamos el ID antes de redirigir
+            const orderId = sessionStorage.getItem('lastCreatedOrderId') || sessionStorage.getItem('currentPaymentOrderId');
+            console.log("ID antes de ir a EmisionFactura:", orderId);
+            
+            if (!orderId) {
+                alert("Error: No se encontró el ID del pedido");
+                return;
+            }
+            
             window.location.href = "EmisionFactura.html";
         }
 
         function continueShopping() {
+            // ✅ NO borrar el ID aún
             window.location.href = "Catalogo.html";
         }
 
