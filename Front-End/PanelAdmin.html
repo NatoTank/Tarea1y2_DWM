@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <title>Chocomanía - Panel de Administrador</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="config.js"></script>
+    <style>
+        :root {
+            --choco-dark: #5D4037;
+            --choco-medium: #8D6E63;
+            --choco-light: #D7CCC8;
+            --choco-gold: #FFB300;
+        }
+        
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .admin-header {
+            background: linear-gradient(135deg, var(--choco-dark), var(--choco-medium));
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 30px;
+        }
+        .admin-title {
+            font-weight: bold;
+            font-size: 1.8rem;
+        }
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .card-header {
+            background: linear-gradient(135deg, var(--choco-dark), var(--choco-medium));
+            color: white;
+            border-radius: 10px 10px 0 0 !important;
+            font-weight: bold;
+        }
+        .table-striped tbody tr:hover {
+            background-color: rgba(93, 64, 55, 0.05);
+        }
+        .badge-admin {
+            background-color: #dc3545;
+        }
+        .badge-repartidor {
+            background-color: #007bff;
+        }
+        .badge-cliente {
+            background-color: #28a745;
+        }
+        .btn-admin {
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 5px 10px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-admin:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(220, 53, 69, 0.3);
+        }
+        .btn-delivery {
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 5px 10px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-delivery:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(0, 123, 255, 0.3);
+        }
+        .btn-user {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 5px 10px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-user:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(40, 167, 69, 0.3);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+        .nav-link-admin {
+            color: var(--choco-dark);
+            text-decoration: none;
+            margin: 0 10px;
+        }
+        .nav-link-admin:hover {
+            color: white;
+        }
+        .loading-spinner {
+            text-align: center;
+            padding: 40px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="admin-header text-center">
+        <div class="container">
+            <div class="admin-title">
+                <i class="fas fa-shield-alt me-2"></i>Panel de Administrador - Chocomanía
+            </div>
+            <p class="mb-0">Gestión de usuarios y roles</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="#">Chocomanía Admin</a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav ms-auto">
+                        <!-- Tabs para navegación -->
+                        <li class="nav-item">
+                            <button class="nav-link active" id="tabUsuarios" onclick="mostrarTab('usuarios')">
+                                <i class="fas fa-users me-1"></i>Usuarios
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" id="tabPedidos" onclick="mostrarTab('pedidos')">
+                                <i class="fas fa-boxes me-1"></i>Pedidos
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+
+        <!-- TAB 1: Gestión de Usuarios -->
+        <div class="tab-content" id="usuariosTab">
+            <div class="container">
+                <h3 style="color: var(--choco-dark);">
+                    <i class="fas fa-users me-2"></i>Gestión de Usuarios
+                </h3>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-list me-2"></i>Lista de Usuarios</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Loading -->
+                        <div class="loading-spinner" id="loadingSpinner">
+                            <div class="spinner-border" style="color: var(--choco-dark);" role="status">
+                                <span class="visually-hidden">Cargando...</span>
+                            </div>
+                            <p class="mt-3">Cargando usuarios...</p>
+                        </div>
+
+                        <!-- Tabla -->
+                        <div class="table-responsive" id="usersTableContainer" style="display: none;">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Email</th>
+                                        <th>Nombre</th>
+                                        <th>Rol Actual</th>
+                                        <th class="text-center">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="usersTableBody"></tbody>
+                            </table>
+                        </div>
+
+                        <!-- Sin usuarios -->
+                        <div class="empty-state" id="emptyState" style="display: none;">
+                            <i class="fas fa-inbox fa-3x mb-3"></i>
+                            <h4>No hay usuarios</h4>
+                            <p>No se encontraron usuarios en el sistema</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: Asignación de Pedidos -->
+        <div class="tab-content" id="pedidosTab" style="display: none;">
+            <div class="container">
+                <h3 style="color: var(--choco-dark);">
+                    <i class="fas fa-boxes me-2"></i>Asignar Pedidos a Repartidores
+                </h3>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-shipping-fast me-2"></i>Pedidos Sin Asignar</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Loading -->
+                        <div class="loading-spinner" id="loadingPedidos">
+                            <div class="spinner-border" style="color: var(--choco-dark);" role="status">
+                                <span class="visually-hidden">Cargando...</span>
+                            </div>
+                            <p class="mt-3">Cargando pedidos...</p>
+                        </div>
+
+                        <!-- Tabla de Pedidos -->
+                        <div class="table-responsive" id="pedidosTableContainer" style="display: none;">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>ID Pedido</th>
+                                        <th>Cliente</th>
+                                        <th>Total</th>
+                                        <th>Estado</th>
+                                        <th>Asignar a</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pedidosTableBody"></tbody>
+                            </table>
+                        </div>
+
+                        <!-- Sin pedidos -->
+                        <div class="empty-state" id="emptyPedidos" style="display: none;">
+                            <i class="fas fa-check-circle fa-3x mb-3"></i>
+                            <h4>Todos los pedidos están asignados</h4>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Información -->
+        <div class="alert alert-info mt-4">
+            <h5><i class="fas fa-info-circle me-2"></i>Información sobre Roles</h5>
+            <ul class="mb-0">
+                <li><strong>Admin:</strong> Acceso total, gestión de usuarios y sistema</li>
+                <li><strong>Repartidor:</strong> Acceso a despachos, seguimiento de pedidos</li>
+                <li><strong>Cliente:</strong> Acceso a compras, carrito y pedidos personales</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Variables globales
+        let users = [];
+
+        // INICIALIZAR
+        document.addEventListener('DOMContentLoaded', async () => {
+            const token = localStorage.getItem('token');
+            
+            if (!token) {
+                alert("Debes iniciar sesión");
+                window.location.href = "Inicio.html";
+                return;
+            }
+
+            // Verificar que sea admin ANTES de cargar usuarios
+            try {
+                const userResponse = await fetch(`${API_URL}/usuarios/me`, {
+                    headers: getAuthHeaders()
+                });
+
+                if (!userResponse.ok) {
+                    alert("Error al verificar permisos");
+                    window.location.href = "Home.html";
+                    return;
+                }
+
+                const currentUser = await userResponse.json();
+                console.log("Usuario actual:", currentUser);
+
+                // Verificar rol
+                if (currentUser.rol !== 'admin' && currentUser.rol !== 'administrador') {
+                    alert("No tienes permisos de administrador");
+                    window.location.href = "Home.html";
+                    return;
+                }
+
+                console.log("Acceso concedido - Usuario es admin");
+                await cargarUsuarios();
+
+            } catch (error) {
+                console.error("Error verificando admin:", error);
+                alert("Error de autenticación");
+                window.location.href = "Home.html";
+            }
+        });
+
+        // CARGAR USUARIOS
+        async function cargarUsuarios() {
+            try {
+                console.log("Iniciando carga de usuarios...");
+                console.log("Headers:", getAuthHeaders());
+                
+                const response = await fetch(`${API_URL}/admin/usuarios`, {
+                    headers: getAuthHeaders()
+                });
+
+                console.log("Status de respuesta:", response.status);
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error("Error en respuesta:", errorData);
+                    
+                    if (response.status === 403) {
+                        alert("No tienes permisos de administrador");
+                        window.location.href = "Home.html";
+                        return;
+                    }
+                    throw new Error(`Error ${response.status}: ${errorData.detail}`);
+                }
+
+                users = await response.json();
+                console.log("Usuarios cargados:", users);
+
+                document.getElementById('loadingSpinner').style.display = 'none';
+
+                if (users.length === 0) {
+                    document.getElementById('emptyState').style.display = 'block';
+                    return;
+                }
+
+                // Mostrar tabla
+                document.getElementById('usersTableContainer').style.display = 'block';
+                const tableBody = document.getElementById('usersTableBody');
+                tableBody.innerHTML = '';
+
+                users.forEach(usuario => {
+                    const badgeClass = `badge-${usuario.rol}`;
+                    const row = `
+                        <tr>
+                            <td><strong>#${usuario.id}</strong></td>
+                            <td>${usuario.email}</td>
+                            <td>${usuario.nombre}</td>
+                            <td>
+                                <span class="badge ${badgeClass}">
+                                    ${usuario.rol.charAt(0).toUpperCase() + usuario.rol.slice(1)}
+                                </span>
+                            </td>
+                            <td class="text-center">
+                                <button class="btn-admin me-2" onclick="asignarRol(${usuario.id}, 'admin')" title="Hacer Admin">
+                                    <i class="fas fa-crown me-1"></i>Admin
+                                </button>
+                                <button class="btn-delivery me-2" onclick="asignarRol(${usuario.id}, 'repartidor')" title="Hacer Repartidor">
+                                    <i class="fas fa-motorcycle me-1"></i>Repartidor
+                                </button>
+                                <button class="btn-user" onclick="asignarRol(${usuario.id}, 'cliente')" title="Hacer Cliente">
+                                    <i class="fas fa-user me-1"></i>Cliente
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                    tableBody.innerHTML += row;
+                });
+
+            } catch (error) {
+                console.error("Error cargando usuarios:", error);
+                document.getElementById('loadingSpinner').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Error al cargar usuarios: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // ASIGNAR ROL
+        async function asignarRol(usuarioId, nuevoRol) {
+            if (!confirm(`¿Cambiar rol del usuario a "${nuevoRol}"?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/admin/usuarios/${usuarioId}/asignar-rol`, {
+                    method: 'PUT',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ rol: nuevoRol })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || `Error ${response.status}`);
+                }
+
+                const result = await response.json();
+                console.log("Rol asignado:", result);
+
+                alert(`✅ ${result.mensaje}`);
+                
+                // Recargar tabla
+                await cargarUsuarios();
+
+            } catch (error) {
+                console.error("Error asignando rol:", error);
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+
+        // Función para cambiar entre tabs
+        function mostrarTab(tab) {
+            document.getElementById('usuariosTab').style.display = tab === 'usuarios' ? 'block' : 'none';
+            document.getElementById('pedidosTab').style.display = tab === 'pedidos' ? 'block' : 'none';
+            
+            document.getElementById('tabUsuarios').classList.toggle('active', tab === 'usuarios');
+            document.getElementById('tabPedidos').classList.toggle('active', tab === 'pedidos');
+            
+            if (tab === 'pedidos') {
+                cargarPedidos();
+            }
+        }
+
+        // Cargar lista de repartidores disponibles
+        async function cargarRepartidores() {
+            try {
+                const response = await fetch(`${API_URL}/admin/usuarios`, {
+                    headers: getAuthHeaders()
+                });
+
+                if (response.ok) {
+                    const usuarios = await response.json();
+                    // Filtrar solo repartidores
+                    const repartidores = usuarios.filter(u => u.rol === 'repartidor');
+                    return repartidores;
+                }
+            } catch (error) {
+                console.error("Error cargando repartidores:", error);
+            }
+            return [];
+        }
+
+        // Cargar pedidos sin asignar
+        async function cargarPedidos() {
+            try {
+                // ✅ Cargar repartidores primero
+                const repartidores = await cargarRepartidores();
+                
+                const response = await fetch(`${API_URL}/admin/pedidos/sin-asignar`, {
+                    headers: getAuthHeaders()
+                });
+
+                if (response.ok) {
+                    const pedidos = await response.json();
+                    console.log("Pedidos sin asignar:", pedidos);
+                    
+                    document.getElementById('loadingPedidos').style.display = 'none';
+                    
+                    if (pedidos.length === 0) {
+                        document.getElementById('emptyPedidos').style.display = 'block';
+                        document.getElementById('pedidosTableContainer').style.display = 'none';
+                        return;
+                    }
+
+                    document.getElementById('pedidosTableContainer').style.display = 'block';
+                    document.getElementById('emptyPedidos').style.display = 'none';
+                    
+                    const tableBody = document.getElementById('pedidosTableBody');
+                    tableBody.innerHTML = '';
+
+                    pedidos.forEach(pedido => {
+                        // ✅ Generar opciones con repartidores reales
+                        let opcionesRepartidores = '<option value="">Seleccionar repartidor...</option>';
+                        repartidores.forEach(rep => {
+                            opcionesRepartidores += `<option value="${rep.id}">${rep.nombre || rep.email} (ID: ${rep.id})</option>`;
+                        });
+
+                        const row = `
+                            <tr>
+                                <td><strong>#${pedido.id}</strong></td>
+                                <td>${pedido.clientName}</td>
+                                <td>$${pedido.total.toLocaleString('es-CL')}</td>
+                                <td><span class="badge bg-warning">${pedido.estado}</span></td>
+                                <td>
+                                    <select class="form-select form-select-sm" id="repartidor_${pedido.id}" onchange="asignarPedido(${pedido.id}, this.value)">
+                                        ${opcionesRepartidores}
+                                    </select>
+                                </td>
+                            </tr>
+                        `;
+                        tableBody.innerHTML += row;
+                    });
+                } else {
+                    const error = await response.json();
+                    console.error("Error:", error);
+                    document.getElementById('loadingPedidos').innerHTML = `
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            ${error.detail || "Error al cargar pedidos"}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error("Error cargando pedidos:", error);
+                document.getElementById('loadingPedidos').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Error: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Asignar pedido a repartidor
+        async function asignarPedido(pedidoId, repartidorId) {
+            if (!repartidorId) return;
+
+            try {
+                const response = await fetch(`${API_URL}/admin/pedidos/${pedidoId}/asignar-repartidor`, {
+                    method: 'PUT',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ repartidor_id: parseInt(repartidorId) })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    alert(`✅ ${result.mensaje}`);
+                    await cargarPedidos();
+                } else {
+                    const error = await response.json();
+                    alert(`❌ Error: ${error.detail}`);
+                }
+            } catch (error) {
+                console.error("Error:", error);
+                alert("Error al asignar pedido");
+            }
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

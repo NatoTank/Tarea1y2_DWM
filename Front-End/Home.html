@@ -283,6 +283,12 @@
                     <li class="nav-item">
                         <a class="nav-link" href="CancelacionPedido.html">Pedidos</a>
                     </li>
+                    <!-- ✅ PANEL ADMIN (Solo para admin) -->
+                    <li class="nav-item" id="adminMenuLi" style="display: none;">
+                        <a class="nav-link" href="PanelAdmin.html" style="color: #dc3545; font-weight: bold;">
+                            <i class="fas fa-shield-alt me-1"></i>Panel Admin
+                        </a>
+                    </li>
                     <li class="nav-item">
                         <a class="nav-link" href="ArmadoPedido.html">
                             <i class="fas fa-shopping-cart"></i>
@@ -294,7 +300,6 @@
                             <i class="fas fa-user-circle" style="color: var(--choco-primary); font-size: 1.7rem;"></i>
                         </a>
                     </li>
-
                 </ul>
             </div>
         </div>
@@ -504,6 +509,41 @@
                 localStorage.setItem('chocomaniaCart', JSON.stringify([]));
             }
             updateCartCount();
+            checkAdminUser();
+        }
+
+        // ✅ VERIFICAR SI ES ADMIN Y MOSTRAR PANEL
+        async function checkAdminUser() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                document.getElementById('adminMenuLi').style.display = 'none';
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/usuarios/me`, {
+                    headers: getAuthHeaders()
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    console.log("Usuario actual:", user);
+                    
+                    // ✅ CORREGIDO: Comparar con "administrador" (el enum que usas en el backend)
+                    if (user.rol === 'administrador' || user.rol === 'admin') {
+                        document.getElementById('adminMenuLi').style.display = 'block';
+                        console.log("Panel Admin mostrado para:", user.email);
+                    } else {
+                        document.getElementById('adminMenuLi').style.display = 'none';
+                    }
+                } else {
+                    console.error("Error obteniendo usuario:", response.status);
+                    document.getElementById('adminMenuLi').style.display = 'none';
+                }
+            } catch (error) {
+                console.error("Error verificando admin:", error);
+                document.getElementById('adminMenuLi').style.display = 'none';
+            }
         }
 
         // Función para añadir producto al carrito

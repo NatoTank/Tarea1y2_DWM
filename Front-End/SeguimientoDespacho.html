@@ -430,265 +430,237 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="config.js"></script>
     <script>
-        // Función para cargar pedidos asignados en el modal
-        function loadAssignedOrders() {
-            const orders = JSON.parse(localStorage.getItem('chocomania_orders')) || [];
-            const assignedOrdersContainer = document.getElementById('assignedOrdersList');
-            
-            // Filtrar pedidos que pueden ser asignados
-            const availableOrders = orders.filter(order => 
-                order.status === 'PAGO ACEPTADO' || 
-                order.status === 'Procesando' ||
-                order.status === 'En Camino'
-            );
-            
-            if (availableOrders.length === 0) {
-                assignedOrdersContainer.innerHTML = `
-                    <div class="text-center py-4">
-                        <i class="fas fa-box-open fa-3x text-muted mb-3"></i>
-                        <h5 class="text-muted">No hay pedidos asignados</h5>
-                        <p class="text-muted">Todos los pedidos están siendo procesados o ya fueron entregados.</p>
-                    </div>
-                `;
-                return;
+        // Referencias DOM
+        const currentOrderNumber = document.getElementById('currentOrderNumber');
+        const clientName = document.getElementById('clientName');
+        const clientAddress = document.getElementById('clientAddress');
+        const driverName = document.getElementById('driverName');
+        const currentStatusBadge = document.getElementById('currentStatus');
+        const estimatedTime = document.getElementById('estimatedTime');
+        const mapLocation = document.getElementById('mapLocation');
+
+        // Variables
+        let trackingInterval = null;
+        let currentOrder = null;
+        let assignedOrders = [];
+
+        // 1. INICIALIZAR
+        document.addEventListener('DOMContentLoaded', async () => {
+            const token = localStorage.getItem('token');
+            if (!token) return window.location.href = "Inicio.html";
+
+            // ✅ CARGAR PEDIDOS ASIGNADOS AL REPARTIDOR
+            await loadAssignedOrders();
+
+            // Si hay al menos un pedido, mostrar el primero
+            if (assignedOrders.length > 0) {
+                selectOrder(assignedOrders[0]);
+                loadUserInfo(token);
+                updateTrackingInfo();
+                trackingInterval = setInterval(updateTrackingInfo, 5000);
+            } else {
+                alert("No tienes pedidos asignados.");
+                window.location.href = "Home.html";
             }
-            
-            assignedOrdersContainer.innerHTML = '';
-            
-            availableOrders.forEach(order => {
-                let statusClass = 'status-pendiente';
-                let statusText = order.status;
-                let buttonHtml = '';
-                
-                if (order.status === 'PAGO ACEPTADO' || order.status === 'Procesando') {
-                    buttonHtml = `
-                        <button class="btn btn-success btn-sm select-order-btn" data-order="${order.id}">
-                            <i class="fas fa-play me-1"></i>Tomar Pedido
-                        </button>
-                    `;
-                } else if (order.status === 'En Camino') {
-                    statusClass = 'status-en-camino';
-                    buttonHtml = `
-                        <button class="btn btn-primary btn-sm select-order-btn" data-order="${order.id}">
-                            <i class="fas fa-eye me-1"></i>Ver Pedido
-                        </button>
-                    `;
-                }
-                
-                const orderCard = document.createElement('div');
-                orderCard.className = 'card mb-3';
-                orderCard.innerHTML = `
-                    <div class="card-body">
-                        <div class="row align-items-center">
-                            <div class="col-md-8">
-                                <h6 class="mb-1">${order.id}</h6>
-                                <p class="mb-1"><strong>Cliente:</strong> ${order.clientName || 'Juan Pérez'}</p>
-                                <p class="mb-1"><strong>Dirección:</strong> ${order.address || 'Av. Principal 123'}</p>
-                                <p class="mb-0"><strong>Total:</strong> $${order.total.toLocaleString('es-CL')}</p>
-                            </div>
-                            <div class="col-md-4 text-end">
-                                <span class="status-badge ${statusClass}">${statusText}</span>
-                                <div class="mt-2">
-                                    ${buttonHtml}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                
-                assignedOrdersContainer.appendChild(orderCard);
-            });
-            
-            // Agregar event listeners a los botones
-            document.querySelectorAll('.select-order-btn').forEach(button => {
-                button.addEventListener('click', function() {
-                    const orderId = this.getAttribute('data-order');
-                    selectOrder(orderId);
+        });
+
+        // ✅ CARGAR PEDIDOS ASIGNADOS AL REPARTIDOR
+        async function loadAssignedOrders() {
+            try {
+                const response = await fetch(`${API_URL}/pedidos/pendientes/despacho`, {
+                    headers: getAuthHeaders()
                 });
-            });
-        }
 
-        // Función para seleccionar un pedido
-        function selectOrder(orderId) {
-            localStorage.setItem('current_tracking_order', orderId);
-            loadTrackingData(orderId);
-            const ordersModal = bootstrap.Modal.getInstance(document.getElementById('ordersModal'));
-            ordersModal.hide();
-        }
-
-        // Función para cargar datos del pedido en el seguimiento
-        function loadTrackingData(orderId) {
-            const orders = JSON.parse(localStorage.getItem('chocomania_orders')) || [];
-            const order = orders.find(o => o.id === orderId);
-            
-            if (order) {
-                document.getElementById('currentOrderNumber').textContent = orderId;
-                document.getElementById('deliveredOrderNumber').textContent = orderId;
-                document.getElementById('clientName').textContent = order.clientName || 'Juan Pérez';
-                document.getElementById('clientAddress').textContent = order.address || 'Av. Principal 123';
-                document.getElementById('clientPhone').textContent = order.phone || '+45 3 124 45781';
-                document.getElementById('deliveredTo').textContent = order.clientName || 'Juan Pérez';
-                document.getElementById('deliveryLocation').textContent = order.address || 'Av. Principal 123';
-                
-                // Actualizar estado
-                if (order.status === 'Entregado') {
-                    showPage('confirmationPage');
-                    document.getElementById('deliveryTime').textContent = order.deliveryTime || '16:54';
-                } else {
-                    showPage('trackingPage');
-                    document.getElementById('currentStatus').textContent = order.status === 'En Camino' ? 'EN CAMINO' : 'PENDIENTE';
+                if (response.ok) {
+                    assignedOrders = await response.json();
+                    console.log("Pedidos asignados:", assignedOrders);
+                } else if (response.status === 403) {
+                    alert("No tienes permisos de repartidor");
+                    window.location.href = "Home.html";
                 }
+            } catch (error) {
+                console.error("Error cargando pedidos:", error);
+                alert("Error al cargar pedidos asignados");
+                window.location.href = "Home.html";
             }
         }
 
-        // Función para iniciar entrega
-        function startDelivery() {
-            const currentOrder = localStorage.getItem('current_tracking_order') || '#CM202400001';
-            const orders = JSON.parse(localStorage.getItem('chocomania_orders')) || [];
-            const updatedOrders = orders.map(order => {
-                if (order.id === currentOrder) {
-                    return { 
-                        ...order, 
-                        status: 'En Camino',
-                        deliveryStartTime: new Date().toLocaleTimeString('es-CL', {hour: '2-digit', minute:'2-digit'})
-                    };
-                }
-                return order;
-            });
+        // ✅ SELECCIONAR PEDIDO PARA VER DETALLES
+        function selectOrder(order) {
+            currentOrder = order;
+            const orderIdNumber = order.id;
             
-            localStorage.setItem('chocomania_orders', JSON.stringify(updatedOrders));
-            alert(`¡Entrega iniciada para ${currentOrder}!`);
-            document.getElementById('currentStatus').textContent = 'EN CAMINO';
-            document.getElementById('startRoute').innerHTML = '<i class="fas fa-route me-2"></i>Ruta en Progreso';
-            document.getElementById('startRoute').classList.remove('btn-choco');
-            document.getElementById('startRoute').classList.add('btn-primary');
+            // Actualizar datos en pantalla
+            document.getElementById('currentOrderNumber').textContent = `#${order.id}`;
+            document.getElementById('clientName').textContent = order.cliente_nombre;
+            document.getElementById('clientAddress').textContent = order.cliente_direccion;
+            document.getElementById('clientPhone').textContent = order.cliente_telefono;
+            document.getElementById('driverName').textContent = "Carlos González"; // Simulado
+            
+            // Actualizar estado
+            const statusText = order.estado.charAt(0).toUpperCase() + order.estado.slice(1);
+            document.getElementById('currentStatus').textContent = statusText;
         }
 
-        // Sistema de navegación entre páginas
+        // 2. CARGAR DATOS CLIENTE
+        async function loadUserInfo(token) {
+            try {
+                const response = await fetch(`${API_URL}/usuarios/me`, {
+                    headers: getAuthHeaders()
+                });
+                if (response.ok) {
+                    const user = await response.json();
+                    // Ya tenemos los datos del cliente en currentOrder
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        // 3. CONSULTAR API DE SEGUIMIENTO
+        async function updateTrackingInfo() {
+            if (!currentOrder) return;
+
+            try {
+                const response = await fetch(`${API_URL}/seguimiento/${currentOrder.id}`, {
+                    headers: getAuthHeaders()
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // Actualizar Estado
+                    const statusBadge = document.getElementById('currentStatus');
+                    statusBadge.textContent = data.estado.toUpperCase();
+                    
+                    if (data.estado === 'Entregado' || data.estado === 'entregado') {
+                        statusBadge.className = 'status-badge status-entregado ms-2';
+                        clearInterval(trackingInterval);
+                        showPage('confirmationPage');
+                        document.getElementById('deliveredOrderNumber').textContent = `#${currentOrder.id}`;
+                        document.getElementById('deliveredTo').textContent = currentOrder.cliente_nombre;
+                        document.getElementById('deliveryLocation').textContent = currentOrder.cliente_direccion;
+                    } else {
+                        statusBadge.className = 'status-badge status-en-camino ms-2';
+                    }
+
+                    // Actualizar Hora Estimada
+                    if (data.hora_estimada_llegada) {
+                        const hora = data.hora_estimada_llegada.split('T')[1]?.substring(0, 5) || data.hora_estimada_llegada;
+                        document.getElementById('estimatedTime').textContent = hora;
+                    }
+
+                    // Actualizar ubicación
+                    if (data.lat && data.lng) {
+                        document.getElementById('mapLocation').innerHTML = `
+                            <div style="font-size: 1.2rem;">
+                                <i class="fas fa-map-marker-alt text-danger"></i>
+                                <br>
+                                <strong>Ubicación Actual:</strong><br>
+                                Lat: ${data.lat.toFixed(4)} <br>
+                                Lng: ${data.lng.toFixed(4)}
+                            </div>
+                        `;
+                    }
+                }
+            } catch (error) {
+                console.error("Error tracking:", error);
+            }
+        }
+
+        // 4. MARCAR COMO "EN CAMINO"
+        document.getElementById('startRoute').addEventListener('click', async function() {
+            if (!currentOrder) return;
+
+            this.disabled = true;
+            this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Marcando...';
+
+            try {
+                const response = await fetch(`${API_URL}/pedidos/${currentOrder.id}/en-camino`, {
+                    method: 'PUT',
+                    headers: getAuthHeaders()
+                });
+
+                if (response.ok) {
+                    alert("Pedido marcado como EN CAMINO");
+                    currentOrder.estado = 'en_camino';
+                    selectOrder(currentOrder);
+                } else {
+                    alert("Error al actualizar pedido");
+                }
+            } catch (error) {
+                console.error(error);
+                alert("Error de conexión");
+            } finally {
+                this.disabled = false;
+                this.innerHTML = '<i class="fas fa-route me-2"></i>Iniciar Ruta';
+            }
+        });
+
+        // 5. CONFIRMAR ENTREGA
+        document.getElementById('confirmDelivery').addEventListener('click', async function() {
+            if (!currentOrder) return;
+
+            this.disabled = true;
+            this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Confirmando...';
+
+            try {
+                const response = await fetch(`${API_URL}/pedidos/${currentOrder.id}/entregado`, {
+                    method: 'PUT',
+                    headers: getAuthHeaders()
+                });
+
+                if (response.ok) {
+                    alert("¡Entrega confirmada!");
+                    currentOrder.estado = 'entregado';
+                    
+                    showPage('confirmationPage');
+                    document.getElementById('deliveredOrderNumber').textContent = `#${currentOrder.id}`;
+                    document.getElementById('deliveredTo').textContent = currentOrder.cliente_nombre;
+                    document.getElementById('deliveryLocation').textContent = currentOrder.cliente_direccion;
+                } else {
+                    alert("Error al confirmar entrega");
+                }
+            } catch (error) {
+                console.error(error);
+                alert("Error de conexión");
+            } finally {
+                this.disabled = false;
+                this.innerHTML = '<i class="fas fa-check-circle me-2"></i>Confirmar Entrega';
+            }
+        });
+
+        // UI: Navegación entre "páginas" (divs)
         function showPage(pageId) {
-            document.querySelectorAll('.page').forEach(page => {
-                page.classList.remove('active');
-            });
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
             document.getElementById(pageId).classList.add('active');
         }
 
-        // Sistema de calificación con estrellas
+        // Botones de navegación
+        document.getElementById('viewOrdersBtn').onclick = () => window.location.href = "CancelacionPedido.html";
+        document.getElementById('backToTracking').onclick = () => showPage('trackingPage');
+        
+        // Botón Reportar (Simulado)
+        document.getElementById('reportProblem').onclick = () => alert("Reporte enviado a soporte.");
+
+        // ESTRELLAS (Calificación)
         const stars = document.querySelectorAll('.star-rating i');
-        let currentRating = 0;
-        const ratingText = document.getElementById('ratingText');
-        
         stars.forEach(star => {
-            star.addEventListener('mouseover', function() {
-                const rating = parseInt(this.getAttribute('data-rating'));
-                highlightStars(rating);
-                updateRatingText(rating);
-            });
-            
-            star.addEventListener('mouseout', function() {
-                highlightStars(currentRating);
-                updateRatingText(currentRating);
-            });
-            
             star.addEventListener('click', function() {
-                currentRating = parseInt(this.getAttribute('data-rating'));
-                highlightStars(currentRating);
-                updateRatingText(currentRating);
-            });
-        });
-        
-        function highlightStars(rating) {
-            stars.forEach(star => {
-                const starRating = parseInt(star.getAttribute('data-rating'));
-                if (starRating <= rating) {
-                    star.classList.add('active');
-                } else {
-                    star.classList.remove('active');
-                }
-            });
-        }
-        
-        function updateRatingText(rating) {
-            const texts = {
-                0: "Toca las estrellas para calificar",
-                1: "Malo",
-                2: "Regular",
-                3: "Bueno",
-                4: "Muy bueno",
-                5: "Excelente"
-            };
-            ratingText.textContent = texts[rating];
-        }
-
-        // Event Listeners
-        document.addEventListener('DOMContentLoaded', function() {
-            // Cargar pedido actual o uno por defecto
-            const currentOrder = localStorage.getItem('current_tracking_order') || '#CM202400001';
-            loadTrackingData(currentOrder);
-            
-            // Configurar modal
-            const ordersModal = new bootstrap.Modal(document.getElementById('ordersModal'));
-            
-            // Botón para ver pedidos asignados
-            document.getElementById('viewOrdersBtn').addEventListener('click', function() {
-                loadAssignedOrders();
-                ordersModal.show();
-            });
-            
-            // Botón iniciar ruta
-            document.getElementById('startRoute').addEventListener('click', startDelivery);
-            
-            // Botón confirmar entrega
-            document.getElementById('confirmDelivery').addEventListener('click', function() {
-                const currentOrder = localStorage.getItem('current_tracking_order') || '#CM202400001';
-                const orders = JSON.parse(localStorage.getItem('chocomania_orders')) || [];
-                const updatedOrders = orders.map(order => {
-                    if (order.id === currentOrder) {
-                        return { 
-                            ...order, 
-                            status: 'Entregado',
-                            deliveryTime: new Date().toLocaleTimeString('es-CL', {hour: '2-digit', minute:'2-digit'})
-                        };
-                    }
-                    return order;
+                const rating = this.getAttribute('data-rating');
+                stars.forEach(s => {
+                    s.classList.remove('active');
+                    if(s.getAttribute('data-rating') <= rating) s.classList.add('active');
                 });
-                
-                localStorage.setItem('chocomania_orders', JSON.stringify(updatedOrders));
-                document.getElementById('deliveryTime').textContent = new Date().toLocaleTimeString('es-CL', {hour: '2-digit', minute:'2-digit'});
-                showPage('confirmationPage');
-            });
-
-            // Los demás event listeners se mantienen igual...
-            document.getElementById('reportProblem').addEventListener('click', function() {
-                alert('Ventana de reporte de problema abierta');
-            });
-
-            document.getElementById('updateLocation').addEventListener('click', function() {
-                alert('Ubicación actualizada correctamente');
-            });
-
-            document.getElementById('callDriver').addEventListener('click', function() {
-                alert('Llamando al repartidor Carlos González...');
-            });
-
-            document.getElementById('submitReview').addEventListener('click', function() {
-                if (currentRating === 0) {
-                    alert('Por favor, selecciona una calificación con las estrellas');
-                    return;
-                }
-                
-                const comment = document.getElementById('reviewComment').value;
-                alert(`¡Gracias por tu reseña!\nCalificación: ${currentRating} estrellas\nComentario: ${comment || 'Sin comentario'}`);
-            });
-
-            document.getElementById('skipReview').addEventListener('click', function() {
-                showPage('trackingPage');
-            });
-
-            document.getElementById('backToTracking').addEventListener('click', function() {
-                showPage('trackingPage');
+                document.getElementById('ratingText').textContent = `Calificación: ${rating}/5`;
             });
         });
+
+        document.getElementById('submitReview').onclick = () => {
+            alert("¡Gracias por tu opinión!");
+            window.location.href = "Home.html";
+        };
+
     </script>
 </body>
 </html>

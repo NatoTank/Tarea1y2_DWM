@@ -107,27 +107,61 @@
         let isConfirming = false;
 
         document.addEventListener('DOMContentLoaded', () => {
-            const pendingOrder = JSON.parse(localStorage.getItem('pendingOrder'));
-            if (!pendingOrder || !pendingOrder.items || pendingOrder.items.length === 0) {
-                alert("No hay pedido pendiente");
+            // Obtener nombre del cliente
+            const token = localStorage.getItem('token');
+            if (token) {
+                fetch(`${API_URL}/usuarios/me`, {
+                    headers: getAuthHeaders()
+                })
+                .then(r => r.json())
+                .then(user => {
+                    document.getElementById('customerName').textContent = user.nombre || user.email;
+                })
+                .catch(e => console.error("Error cargando usuario:", e));
+            }
+
+            // ✅ CORREGIDO: Obtener carrito ANTES que pendingOrder
+            let cart = JSON.parse(localStorage.getItem('chocomaniaCart')) || [];
+            let pendingOrder = JSON.parse(localStorage.getItem('pendingOrder'));
+
+            // ✅ CORREGIDO: Si no hay pendingOrder pero sí hay carrito, usar el carrito
+            if ((!pendingOrder || !pendingOrder.items || pendingOrder.items.length === 0) && cart.length > 0) {
+                const orderData = {
+                    items: cart,
+                    total: cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+                };
+                renderOrder(orderData);
+                localStorage.setItem('pendingOrder', JSON.stringify(orderData));
+            } else if (pendingOrder && pendingOrder.items && pendingOrder.items.length > 0) {
+                renderOrder(pendingOrder);
+            } else {
+                // Si no hay ni pendingOrder ni carrito, mostrar error
+                alert("No hay productos en el carrito");
                 window.location.href = "ArmadoPedido.html";
                 return;
             }
-
-            // Mostrar visual del pedido
-            const orderItems = document.getElementById('orderItems');
-            orderItems.innerHTML = '';
-            pendingOrder.items.forEach(item => {
-                orderItems.innerHTML += `<tr>
-                    <td>${item.name}</td>
-                    <td class="text-center">${item.quantity}</td>
-                    <td class="text-end">$${(item.price * item.quantity).toLocaleString('es-CL')}</td>
-                </tr>`;
-            });
-            document.getElementById('orderTotal').textContent = pendingOrder.total.toLocaleString('es-CL');
         });
 
-        // BOTÓN CONFIRMAR
+        // ✅ NUEVA FUNCIÓN: Renderizar orden
+        function renderOrder(pendingOrder) {
+            const orderItems = document.getElementById('orderItems');
+            orderItems.innerHTML = '';
+            
+            pendingOrder.items.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${item.name}</td>
+                    <td class="text-center">${item.quantity}</td>
+                    <td class="text-end">$${(item.price).toLocaleString('es-CL')}</td>
+                    <td class="text-end">$${(item.price * item.quantity).toLocaleString('es-CL')}</td>
+                `;
+                orderItems.appendChild(row);
+            });
+            
+            document.getElementById('orderTotal').textContent = pendingOrder.total.toLocaleString('es-CL');
+        }
+
+        // BOTÓN CONFIRMAR - ORDEN CORRECTA
         document.getElementById('confirmOrderBtn').addEventListener('click', async function(e) {
             e.preventDefault();
             if (isConfirming) return;
@@ -140,39 +174,60 @@
                 const token = localStorage.getItem('token');
                 if (!token) throw new Error("No autenticado");
 
-                const pendingOrder = JSON.parse(localStorage.getItem('pendingOrder'));
-                if (!pendingOrder) throw new Error("No hay pedido");
+                // ✅ PASO 1: VERIFICAR CARRITO (ANTES DE NADA)
+                const cart = JSON.parse(localStorage.getItem('chocomaniaCart')) || [];
+                console.log("1️⃣ Carrito verificado:", cart);
+                
+                if (cart.length === 0) {
+                    throw new Error("El carrito está vacío");
+                }
 
-                // PASO 1: Crear pedido en backend
+                // ✅ PASO 2: CREAR PEDIDO EN BACKEND
+                console.log("2️⃣ Enviando petición POST a /pedidos/crear-pago-desde-carrito");
                 const response = await fetch(`${API_URL}/pedidos/crear-pago-desde-carrito`, {
                     method: 'POST',
                     headers: getAuthHeaders()
                 });
 
+                console.log("3️⃣ Status respuesta:", response.status);
+
                 if (!response.ok) {
-                    throw new Error(`Error ${response.status}`);
+                    const errorData = await response.json();
+                    console.error("❌ Error del servidor:", errorData);
+                    throw new Error(errorData.detail || `Error ${response.status}`);
                 }
 
                 const data = await response.json();
-                console.log("Respuesta del servidor:", data);
+                console.log("4️⃣ Respuesta exitosa:", data);
 
-                // PASO 2: Guardar ID del pedido creado
-                if (!data.pedido_id) throw new Error("No se recibió ID del pedido");
+                // ✅ PASO 3: OBTENER ID DEL PEDIDO
+                const pedidoId = data.pedido_id || data.id;
+                
+                if (!pedidoId) {
+                    console.error("❌ No hay ID en respuesta:", data);
+                    throw new Error("No se recibió ID del pedido");
+                }
 
-                const pedidoId = data.pedido_id;
+                console.log("5️⃣ Pedido creado con ID:", pedidoId);
                 
-                // Guardar en sessionStorage para la siguiente página
-                sessionStorage.setItem('lastCreatedOrderId', pedidoId);
+                // ✅ PASO 4: GUARDAR EN SESSIONSTORAGE
+                sessionStorage.setItem('lastCreatedOrderId', String(pedidoId));
+                sessionStorage.setItem('lastOrderTotal', String(data.total || 0));
+                console.log("6️⃣ Datos guardados en sessionStorage");
                 
-                // Limpiar datos de pendiente
+                // ✅ PASO 5: LIMPIAR LOCALSTORAGE (SOLO AQUÍ)
                 localStorage.removeItem('pendingOrder');
                 localStorage.removeItem('chocomaniaCart');
+                console.log("7️⃣ Carrito limpiado");
 
-                // PASO 3: Ir a confirmación de pago
-                window.location.href = `ConfirmacionPago.html?order_id=${pedidoId}`;
+                // ✅ PASO 6: REDIRIGIR
+                console.log("8️⃣ Redirigiendo a ConfirmacionPago.html");
+                setTimeout(() => {
+                    window.location.href = `ConfirmacionPago.html?order_id=${pedidoId}`;
+                }, 500);
 
             } catch (error) {
-                console.error("Error:", error);
+                console.error("❌ Error completo:", error);
                 alert("Error: " + error.message);
                 this.disabled = false;
                 this.innerHTML = '<i class="fas fa-check me-2"></i>Confirmar Pedido';

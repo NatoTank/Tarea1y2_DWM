@@ -136,61 +136,97 @@
     </div>
   </div>
 
+  <script src="config.js"></script>
   <script>
-    document.getElementById('personalDataForm').addEventListener('submit', function(event) {
-      event.preventDefault();
-      
-      const nombre = document.getElementById('nombre').value;
-      const direccion = document.getElementById('direccion').value;
-      const comuna = document.getElementById('comuna').value;
-      const telefono = document.getElementById('telefono').value;
-      const errorMessage = document.getElementById('errorMessage');
-      
-      
-      errorMessage.style.display = 'none';
-      
-      
-      if (!nombre || !direccion || !comuna || !telefono) {
-        errorMessage.textContent = 'Faltan datos obligatorios';
-        errorMessage.style.display = 'block';
-        return;
-      }
-      
-      
-      const phoneRegex = /^[0-9+-\s()]{8,}$/;
-      if (!phoneRegex.test(telefono)) {
-        errorMessage.textContent = 'El número de teléfono no es válido';
-        errorMessage.style.display = 'block';
-        return;
-      }
-      
-      
-      setTimeout(function() {
-        const successModal = new bootstrap.Modal(document.getElementById('successModal'));
-        successModal.show();
-        
-        
-        console.log('Datos guardados:', {
-          nombre: nombre,
-          direccion: direccion,
-          comuna: comuna,
-          telefono: telefono
-        });
-      }, 500);
-    });
+      const token = localStorage.getItem('token');
 
-    
-    document.getElementById('telefono').addEventListener('input', function() {
-      
-      let value = this.value.replace(/\D/g, '');
-      
-      
-      if (value.length === 9) {
-        value = value.replace(/(\d{1})(\d{4})(\d{4})/, '$1 $2 $3');
-      }
-      
-      this.value = value;
-    });
+      // 1. CARGAR DATOS AL ENTRAR
+      document.addEventListener('DOMContentLoaded', async () => {
+          if (!token) {
+              alert("Debes iniciar sesión para ver tus datos.");
+              window.location.href = "Inicio.html";
+              return;
+          }
+
+          try {
+              // Petición GET al backend para saber quién soy
+              const response = await fetch(`${API_URL}/usuarios/me`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+              });
+              
+              if (response.ok) {
+                  const user = await response.json();
+                  // Rellenar los inputs automáticamente con lo que venga de la BD
+                  document.getElementById('nombre').value = user.nombre || '';
+                  document.getElementById('direccion').value = user.direccion || '';
+                  document.getElementById('comuna').value = user.comuna || '';
+                  document.getElementById('telefono').value = user.telefono || '';
+                  console.log("Datos cargados:", user);
+              }
+          } catch (error) {
+              console.error("Error cargando perfil", error);
+          }
+      });
+
+      // 2. GUARDAR CAMBIOS (Botón ENVIAR)
+      document.getElementById('personalDataForm').addEventListener('submit', async function(event) {
+          event.preventDefault();
+          
+          const nombre = document.getElementById('nombre').value;
+          const direccion = document.getElementById('direccion').value;
+          const comuna = document.getElementById('comuna').value;
+          const telefono = document.getElementById('telefono').value;
+          const errorMessage = document.getElementById('errorMessage');
+          
+          errorMessage.style.display = 'none';
+          
+          // Validaciones básicas
+          if (!nombre || !direccion || !comuna || !telefono) {
+              errorMessage.textContent = 'Faltan datos obligatorios';
+              errorMessage.style.display = 'block';
+              return;
+          }
+
+          // Petición PUT al backend para actualizar
+          try {
+              const response = await fetch(`${API_URL}/usuarios/me/datos`, {
+                  method: 'PUT',
+                  headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${token}`
+                  },
+                  body: JSON.stringify({
+                      nombre: nombre,
+                      direccion: direccion,
+                      comuna: comuna,
+                      telefono: telefono
+                  })
+              });
+
+              if (response.ok) {
+                  // Mostrar modal de éxito
+                  const successModal = new bootstrap.Modal(document.getElementById('successModal'));
+                  successModal.show();
+              } else {
+                  const err = await response.json();
+                  errorMessage.textContent = 'Error: ' + (err.detail || 'No se pudo guardar');
+                  errorMessage.style.display = 'block';
+              }
+          } catch (error) {
+              console.error(error);
+              errorMessage.textContent = 'Error de conexión';
+              errorMessage.style.display = 'block';
+          }
+      });
+
+      // Formato teléfono (Tu lógica original para que se vea bonito)
+      document.getElementById('telefono').addEventListener('input', function() {
+          let value = this.value.replace(/\D/g, '');
+          if (value.length === 9) {
+              value = value.replace(/(\d{1})(\d{4})(\d{4})/, '$1 $2 $3');
+          }
+          this.value = value;
+      });
   </script>
 </body>
 </html>

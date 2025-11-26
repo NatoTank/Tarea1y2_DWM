@@ -170,7 +170,7 @@
         <div class="row justify-content-center mb-4">
             <div class="col-12 col-md-8">
                 <div class="customer-info">
-                    <h5><i class="fas fa-user me-2"></i>Cliente: Castellón Prado Salvador</h5>
+                    <h5><i class="fas fa-user me-2"></i>Cliente: <span id="clienteNombre">Cargando...</span></h5>
                 </div>
             </div>
         </div>
@@ -251,38 +251,49 @@
     </div>
 
     <script>
-        // Referencias
+        // Referencias DOM
         const cartItemsContainer = document.getElementById('cartItems');
         const cartTableContainer = document.getElementById('cartTableContainer');
         const totalSection = document.getElementById('totalSection');
         const actionButtons = document.getElementById('actionButtons');
         const emptyCartMessage = document.getElementById('emptyCartMessage');
         const cartTotalElement = document.getElementById('cartTotal');
+        const clienteNombreLabel = document.getElementById('clienteNombre'); // Referencia al nombre
 
-        // --- FUNCIONES DEL CARRITO (GLOBALES) ---
-        
-        // 1. Leer
-        function getLocalCart() { 
-            return JSON.parse(localStorage.getItem('chocomaniaCart')) || []; 
-        }
-        
-        // 2. Guardar
-        function saveLocalCart(cart) { 
-            localStorage.setItem('chocomaniaCart', JSON.stringify(cart)); 
-        }
-        
-        // 3. Formato Precio
-        function formatPrice(price) { 
-            return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(price); 
+        // --- 1. CARGAR DATOS DEL USUARIO (NUEVO) ---
+        async function loadUserData() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                if(clienteNombreLabel) clienteNombreLabel.textContent = "Invitado";
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/usuarios/me`, {
+                    headers: getAuthHeaders()
+                });
+                if (response.ok) {
+                    const user = await response.json();
+                    // Si tiene nombre lo muestra, si no, muestra el email
+                    if(clienteNombreLabel) {
+                        clienteNombreLabel.textContent = user.nombre || user.email;
+                    }
+                }
+            } catch (error) {
+                console.error("Error cargando usuario", error);
+            }
         }
 
-        // 4. Renderizar (Dibujar)
+        // --- 2. FUNCIONES DEL CARRITO ---
+        function getLocalCart() { return JSON.parse(localStorage.getItem('chocomaniaCart')) || []; }
+        function saveLocalCart(cart) { localStorage.setItem('chocomaniaCart', JSON.stringify(cart)); }
+        function formatPrice(price) { return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(price); }
+
         function renderCart() {
             const cart = getLocalCart();
             cartItemsContainer.innerHTML = '';
 
             if (cart.length === 0) {
-                // Vista vacía
                 cartTableContainer.classList.add('d-none');
                 totalSection.classList.add('d-none');
                 actionButtons.classList.add('d-none');
@@ -290,7 +301,6 @@
                 return;
             }
 
-            // Vista con productos
             cartTableContainer.classList.remove('d-none');
             totalSection.classList.remove('d-none');
             actionButtons.classList.remove('d-none');
@@ -300,26 +310,18 @@
             cart.forEach((item, index) => {
                 const subtotal = item.price * item.quantity;
                 total += subtotal;
-                
                 const row = document.createElement('tr');
                 row.innerHTML = `
-                    <td>
-                        <strong>${item.name}</strong>
-                        <div class="text-muted small">Código: ${item.id}</div>
-                    </td>
+                    <td><strong>${item.name}</strong><div class="text-muted small">Código: ${item.id}</div></td>
                     <td class="text-center">
-                        <div class="quantity-control">
-                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="updateQty(${index}, -1)">-</button>
-                            <span style="min-width:20px; display:inline-block;">${item.quantity}</span>
-                            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="updateQty(${index}, 1)">+</button>
-                        </div>
+                        <button class="btn btn-sm btn-outline-secondary me-2" onclick="updateQty(${index}, -1)">-</button>
+                        <span style="min-width:20px; display:inline-block;">${item.quantity}</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="updateQty(${index}, 1)">+</button>
                     </td>
                     <td class="text-end">${formatPrice(item.price)}</td>
                     <td class="text-end">${formatPrice(subtotal)}</td>
                     <td class="text-center">
-                        <button class="btn btn-danger btn-sm" onclick="removeItem(${index})">
-                            <i class="fas fa-trash"></i>
-                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="removeItem(${index})"><i class="fas fa-trash"></i></button>
                     </td>
                 `;
                 cartItemsContainer.appendChild(row);
@@ -327,21 +329,16 @@
             cartTotalElement.textContent = formatPrice(total);
         }
 
-        // --- FUNCIONES DE ACCIÓN (WINDOW) ---
-        
-        // Borrar un item (Basurero Rojo)
         window.removeItem = function(index) {
             const cart = getLocalCart();
-            cart.splice(index, 1); // Saca el elemento de la lista
-            saveLocalCart(cart);   // Guarda
-            renderCart();          // Redibuja
+            cart.splice(index, 1);
+            saveLocalCart(cart);
+            renderCart();
         };
 
-        // Cambiar cantidad (+ / -)
         window.updateQty = function(index, delta) {
             const cart = getLocalCart();
             const newQty = cart[index].quantity + delta;
-            
             if (newQty > 0) {
                 cart[index].quantity = newQty;
                 saveLocalCart(cart);
@@ -349,51 +346,32 @@
             }
         };
 
-        // Borrar TODO (Botón Vaciar Carrito)
-        document.getElementById('clearCartBtn').onclick = async function() {
-            if(confirm("¿Estás seguro de vaciar todo el carrito?")) {
-                // Limpiar Local
-                localStorage.removeItem('chocomaniaCart');
-                localStorage.removeItem('pendingOrder');
-                
-                // Limpiar Backend también (por si acaso)
-                const token = localStorage.getItem('token');
-                if(token) {
-                    try {
-                        await fetch(`${API_URL}/carrito`, { method: 'DELETE', headers: getAuthHeaders() });
-                    } catch(e) { console.log("No se pudo limpiar backend, pero local sí"); }
-                }
-                
-                renderCart();
-            }
-        };
-
         // --- CONFIRMAR PEDIDO ---
         document.getElementById('confirmOrderBtn').onclick = async function() {
             const token = localStorage.getItem('token');
-            if (!token) { 
-                alert("Debes iniciar sesión"); 
-                window.location.href = "Inicio.html"; 
-                return; 
-            }
+            if (!token) { alert("Debes iniciar sesión"); window.location.href = "Inicio.html"; return; }
 
             const cart = getLocalCart();
             if(cart.length === 0) return alert("El carrito está vacío");
 
-            // 1. Guardar Datos
             const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-            const orderData = { items: cart, total: total, customer: "Cliente" };
+            
+            // Obtenemos el nombre actual del label para guardarlo en el pedido
+            const customerName = document.getElementById('clienteNombre').textContent;
+
+            const orderData = { 
+                items: cart, 
+                total: total, 
+                customer: customerName // Guardamos el nombre real aquí
+            };
             localStorage.setItem('pendingOrder', JSON.stringify(orderData));
 
-            // 2. UI Loading
             const btn = this;
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Guardando...';
 
             try {
-                // 3. Sync Backend
                 await fetch(`${API_URL}/carrito`, { method: 'DELETE', headers: getAuthHeaders() });
-                
                 for (const item of cart) {
                     await fetch(`${API_URL}/carrito/items`, {
                         method: 'POST',
@@ -401,10 +379,7 @@
                         body: JSON.stringify({ producto_id: item.id, cantidad: item.quantity })
                     });
                 }
-
-                // 4. Ir a Confirmación
                 window.location.href = 'ConfirmacionPedido.html';
-
             } catch (error) {
                 console.error(error);
                 alert("Error de conexión");
@@ -413,12 +388,15 @@
             }
         };
 
-        // Botones Navegación
+        document.getElementById('clearCartBtn').onclick = () => {
+            if(confirm("¿Vaciar carrito?")) { localStorage.removeItem('chocomaniaCart'); renderCart(); }
+        };
         document.getElementById('continueShoppingBtn').onclick = () => window.location.href = "Catalogo.html";
         document.getElementById('continueShoppingBtn2').onclick = () => window.location.href = "Catalogo.html";
 
-        // Iniciar
-        renderCart();
+        // INICIALIZAR
+        loadUserData(); // <-- ESTO CARGA TU NOMBRE
+        renderCart();   // <-- ESTO MUESTRA LOS PRODUCTOS
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>

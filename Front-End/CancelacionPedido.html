@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="config.js"></script>
     <style>
         :root {
             --choco-dark: #5D4037;
@@ -148,27 +149,27 @@
             font-size: 0.8rem;
             font-weight: bold;
         }
-        .status-pago-aceptado {
-            background-color: #d1ecf1;
-            color: #0c5460;
-        }
-        .status-procesando {
+        .status-pending {
             background-color: #fff3cd;
             color: #856404;
         }
-        .status-enviado {
+        .status-processing {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .status-shipped {
             background-color: #d4edda;
             color: #155724;
         }
-        .status-entregado {
+        .status-delivered {
             background-color: #d1ecf1;
             color: #0c5460;
         }
-        .status-cancelado {
+        .status-canceled {
             background-color: #f8d7da;
             color: #721c24;
         }
-        .status-en-camino {
+        .status-in-transit {
             background-color: #E3F2FD;
             color: #1565C0;
         }
@@ -192,6 +193,13 @@
             justify-content: center;
             flex-wrap: wrap;
         }
+        .nav-link {
+            color: var(--choco-dark);
+            text-decoration: none;
+        }
+        .nav-link:hover {
+            color: var(--choco-gold);
+        }
     </style>
 </head>
 <body>
@@ -200,6 +208,19 @@
         <div class="container">
             <div class="choco-logo">Chocomanía</div>
             <div>https://www.Chocomania.cl</div>
+        </div>
+    </div>
+
+    <!-- Navegación -->
+    <div class="container mb-4">
+        <div class="d-flex justify-content-between align-items-center">
+            <a href="Home.html" class="nav-link">
+                <i class="fas fa-arrow-left me-2"></i>Volver al Inicio
+            </a>
+            <h4 class="mb-0">Mis Pedidos</h4>
+            <a href="ArmadoPedido.html" class="nav-link">
+                <i class="fas fa-shopping-cart me-2"></i>Mi Carrito
+            </a>
         </div>
     </div>
 
@@ -239,7 +260,7 @@
                                     </tr>
                                 </thead>
                                 <tbody id="ordersTableBody">
-                                    <!-- Los pedidos se cargarán desde localStorage -->
+                                    <!-- Los pedidos se cargarán desde la API -->
                                 </tbody>
                             </table>
                         </div>
@@ -292,173 +313,249 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Cargar pedidos desde localStorage
-        const orders = JSON.parse(localStorage.getItem('chocomania_orders')) || [];
-        const ordersTableBody = document.getElementById('ordersTableBody');
-        const ordersTableContainer = document.getElementById('ordersTableContainer');
-        const emptyOrdersMessage = document.getElementById('emptyOrdersMessage');
-        
-        console.log('Pedidos cargados:', orders); // Para debug
-        
-        // Si no hay pedidos, mostrar mensaje
-        if (orders.length === 0) {
-            ordersTableContainer.classList.add('d-none');
-            emptyOrdersMessage.classList.remove('d-none');
-        } else {
-            ordersTableContainer.classList.remove('d-none');
-            emptyOrdersMessage.classList.add('d-none');
-            
-            // Mostrar pedidos reales desde localStorage
-            ordersTableBody.innerHTML = '';
-            orders.forEach(order => {
-                // Estados que permiten cancelación: PAGO ACEPTADO, Procesando
-                const canCancel = order.status === 'PAGO ACEPTADO' || order.status === 'Procesando' || order.status === 'pending_payment';
-                
-                // Estados que NO permiten cancelación: Enviado, Entregado, En tránsito, etc.
-                const cannotCancel = order.status === 'Enviado' || order.status === 'Entregado' || order.status === 'En tránsito' || order.status === 'En Camino';
-                
-                // Determinar clase CSS para el estado
-                let statusClass = 'status-procesando';
-                if (order.status === 'PAGO ACEPTADO') statusClass = 'status-pago-aceptado';
-                else if (order.status === 'Enviado' || order.status === 'En Camino') statusClass = 'status-en-camino';
-                else if (order.status === 'Entregado') statusClass = 'status-entregado';
-                else if (order.status === 'Cancelado') statusClass = 'status-cancelado';
-                
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td><strong>${order.id}</strong></td>
-                    <td>${order.date}</td>
-                    <td class="text-end">$${order.total.toLocaleString('es-CL')}</td>
-                    <td class="text-center">
-                        <span class="status-badge ${statusClass}">
-                            ${order.status}
-                        </span>
-                    </td>
-                    <td class="text-center">
-                        <div class="action-buttons">
-                            ${canCancel ? 
-                                `<button class="btn btn-danger-small cancel-btn" data-order="${order.id}">
-                                    <i class="fas fa-times me-1"></i>Cancelar
-                                </button>` : 
-                                cannotCancel ?
-                                `<button class="btn btn-primary-small track-btn" data-order="${order.id}">
-                                    <i class="fas fa-map-marker-alt me-1"></i>Seguir Pedido
-                                </button>` :
-                                `<button class="btn btn-disabled" disabled>
-                                    <i class="fas fa-times me-1"></i>Cancelado
-                                </button>`
-                            }
-                        </div>
-                    </td>
-                `;
-                ordersTableBody.appendChild(row);
-            });
-        }
-
-        // Configuración del modal de cancelación
-        const cancelModalElement = document.getElementById('cancelModal');
-        const modalOrderNumber = document.getElementById('modalOrderNumber');
-        const confirmCancelBtn = document.getElementById('confirmCancelBtn');
-        const cancelReason = document.getElementById('cancelReason');
-        const cancelExplanation = document.getElementById('cancelExplanation');
-
-        if (typeof bootstrap === 'undefined') {
-            console.error('Bootstrap no está cargado');
-            return;
-        }
-
-        const cancelModal = new bootstrap.Modal(cancelModalElement);
+    <script>
+        // Variables globales
         let currentOrderToCancel = null;
+        let modalCancel = null;
 
-        function handleCancelClick(event) {
-            const button = event.currentTarget;
-            const orderNumber = button.getAttribute('data-order');
-            currentOrderToCancel = orderNumber;
+        // 1. INICIALIZAR
+        document.addEventListener('DOMContentLoaded', async function() {
+            const token = localStorage.getItem('token');
             
-            cancelReason.value = "";
-            cancelExplanation.value = "";
-            
-            modalOrderNumber.textContent = orderNumber;
-            cancelModal.show();
-        }
-
-        // Función para manejar el seguimiento de pedidos
-        function handleTrackClick(event) {
-            const button = event.currentTarget;
-            const orderNumber = button.getAttribute('data-order');
-            
-            // Guardar el pedido actual para seguimiento
-            localStorage.setItem('current_tracking_order', orderNumber);
-            
-            // Redirigir a la página de seguimiento
-            window.location.href = 'InformacionLlegada.html';
-        }
-
-        document.querySelectorAll('.cancel-btn').forEach(button => {
-            button.addEventListener('click', handleCancelClick);
-        });
-
-        document.querySelectorAll('.track-btn').forEach(button => {
-            button.addEventListener('click', handleTrackClick);
-        });
-
-        confirmCancelBtn.addEventListener('click', function() {
-            if (!cancelReason.value) {
-                alert('Por favor, seleccione un motivo de cancelación.');
+            // Validar sesión
+            if (!token) {
+                alert("Debes iniciar sesión para ver tu historial.");
+                window.location.href = "Inicio.html";
                 return;
             }
-            
-            confirmCancelBtn.disabled = true;
-            confirmCancelBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Procesando...';
-            
-            setTimeout(() => {
-                // Actualizar en localStorage
-                const orders = JSON.parse(localStorage.getItem('chocomania_orders')) || [];
-                const updatedOrders = orders.map(order => {
-                    if (order.id === currentOrderToCancel) {
-                        return { 
-                            ...order, 
-                            status: 'Cancelado',
-                            cancelReason: cancelReason.value,
-                            cancelExplanation: cancelExplanation.value,
-                            cancelDate: new Date().toLocaleDateString('es-CL')
-                        };
-                    }
-                    return order;
-                });
-                localStorage.setItem('chocomania_orders', JSON.stringify(updatedOrders));
-                
-                // Actualizar la tabla
-                const rows = ordersTableBody.getElementsByTagName('tr');
-                for (let row of rows) {
-                    const orderCell = row.cells[0].querySelector('strong');
-                    if (orderCell && orderCell.textContent === currentOrderToCancel) {
-                        const statusCell = row.cells[3];
-                        statusCell.innerHTML = '<span class="status-badge status-cancelado">Cancelado</span>';
-                        
-                        const actionCell = row.cells[4];
-                        actionCell.innerHTML = '<button class="btn btn-disabled" disabled><i class="fas fa-times me-1"></i>Cancelado</button>';
-                        break;
-                    }
-                }
-                
-                cancelModal.hide();
-                confirmCancelBtn.disabled = false;
-                confirmCancelBtn.innerHTML = 'Confirmar Cancelación';
-                
-                alert(`El pedido ${currentOrderToCancel} ha sido cancelado exitosamente.`);
-            }, 1500);
+
+            // Inicializar Modal de Bootstrap
+            const modalElement = document.getElementById('cancelModal');
+            if (modalElement) {
+                modalCancel = new bootstrap.Modal(modalElement);
+            }
+
+            // Cargar tabla
+            await cargarHistorial();
         });
 
-        cancelModalElement.addEventListener('hidden.bs.modal', function () {
-            cancelReason.value = "";
-            cancelExplanation.value = "";
-            confirmCancelBtn.disabled = false;
-            confirmCancelBtn.innerHTML = 'Confirmar Cancelación';
+        // 2. CARGAR PEDIDOS DESDE API
+        async function cargarHistorial() {
+            const tableBody = document.getElementById('ordersTableBody');
+            const container = document.getElementById('ordersTableContainer');
+            const emptyMsg = document.getElementById('emptyOrdersMessage');
+
+            try {
+                // Endpoint correcto: /pedidos
+                const response = await fetch(`${API_URL}/pedidos`, {
+                    headers: getAuthHeaders()
+                });
+
+                if (response.ok) {
+                    const orders = await response.json();
+
+                    // Si no hay pedidos
+                    if (orders.length === 0) {
+                        container.classList.add('d-none');
+                        emptyMsg.classList.remove('d-none');
+                        return;
+                    }
+
+                    // Mostrar tabla
+                    container.classList.remove('d-none');
+                    emptyMsg.classList.add('d-none');
+                    tableBody.innerHTML = '';
+
+                    // Ordenar: Más nuevos primero
+                    orders.sort((a, b) => {
+                        const dateA = new Date(a.fecha_creacion || 0);
+                        const dateB = new Date(b.fecha_creacion || 0);
+                        return dateB - dateA;
+                    });
+
+                    // Renderizar filas
+                    orders.forEach(order => {
+                        // Lógica de Estados y Botones
+                        let badgeClass = '';
+                        let statusText = '';
+                        let actionBtn = '';
+
+                        // Normalizar estado a minúsculas para comparación
+                        const estado = (order.estado || '').toLowerCase();
+
+                        if (estado === 'pendiente_de_pago' || estado === 'pending_payment') {
+                            badgeClass = 'status-pending';
+                            statusText = 'Pendiente Pago';
+                            actionBtn = getCancelBtn(order.id);
+                        } else if (estado === 'pagado' || estado === 'en_preparacion') {
+                            badgeClass = 'status-shipped';
+                            statusText = 'Pago Recibido';
+                            actionBtn = getCancelBtn(order.id);
+                        } else if (estado === 'despachado' || estado === 'en_camino') {
+                            badgeClass = 'status-in-transit';
+                            statusText = 'En Camino';
+                            // ✅ BOTÓN PARA VER SEGUIMIENTO ACTUALIZADO
+                            actionBtn = `
+                                <button class="btn btn-primary-small track-btn" onclick="irAlSeguimiento(${order.id})">
+                                    <i class="fas fa-map-marker-alt me-1"></i>Seguir Pedido
+                                </button>
+                            `;
+                        } else if (estado === 'entregado') {
+                            badgeClass = 'status-delivered';
+                            statusText = 'Entregado';
+                            actionBtn = '<button class="btn btn-disabled" disabled><i class="fas fa-check"></i> Completado</button>';
+                        } else if (estado === 'cancelado' || estado === 'rechazado') {
+                            badgeClass = 'status-canceled';
+                            statusText = 'Cancelado';
+                            actionBtn = '<button class="btn btn-disabled" disabled>Cancelado</button>';
+                        } else {
+                            badgeClass = 'status-processing';
+                            statusText = estado || 'Procesando';
+                            actionBtn = getCancelBtn(order.id);
+                        }
+
+                        // Formatear Fecha
+                        let fecha = '';
+                        if (order.fecha_creacion) {
+                            try {
+                                const dateObj = new Date(order.fecha_creacion);
+                                fecha = dateObj.toLocaleDateString('es-CL');
+                            } catch (e) {
+                                fecha = order.fecha_creacion;
+                            }
+                        }
+
+                        // Formatear Precio
+                        const total = new Intl.NumberFormat('es-CL', { 
+                            style: 'currency', 
+                            currency: 'CLP',
+                            minimumFractionDigits: 0
+                        }).format(order.total || 0);
+
+                        // HTML de la fila
+                        const row = `
+                            <tr>
+                                <td><strong>#${order.id}</strong></td>
+                                <td>${fecha || 'N/A'}</td>
+                                <td class="text-end">${total}</td>
+                                <td class="text-center">
+                                    <span class="status-badge ${badgeClass}">${statusText}</span>
+                                </td>
+                                <td class="text-center">
+                                    <div class="action-buttons">
+                                        ${actionBtn}
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                        tableBody.innerHTML += row;
+                    });
+
+                } else {
+                    console.error("Error cargando pedidos:", response.status);
+                    container.classList.add('d-none');
+                    emptyMsg.classList.remove('d-none');
+                }
+            } catch (error) {
+                console.error("Error:", error);
+                container.classList.add('d-none');
+                emptyMsg.classList.remove('d-none');
+            }
+        }
+
+        // Helpers para botones HTML
+        function getCancelBtn(id) {
+            return `<button class="btn btn-danger-small cancel-btn" onclick="abrirModalCancelar('${id}')">
+                        <i class="fas fa-times me-1"></i>Cancelar
+                    </button>`;
+        }
+
+        function getTrackBtn(id) {
+            return `<button class="btn btn-primary-small track-btn" onclick="irAlSeguimiento('${id}')">
+                        <i class="fas fa-map-marker-alt me-1"></i>Seguir
+                    </button>`;
+        }
+
+        // 3. LÓGICA DE BOTONES
+
+        // Abrir modal
+        window.abrirModalCancelar = function(id) {
+            currentOrderToCancel = id;
+            document.getElementById('modalOrderNumber').textContent = "#" + id;
+            document.getElementById('cancelReason').value = "";
+            document.getElementById('cancelExplanation').value = "";
+            
+            if (modalCancel) modalCancel.show();
+        };
+
+        // Ir al seguimiento
+        window.irAlSeguimiento = function(id) {
+            localStorage.setItem('current_tracking_order', id);
+            window.location.href = 'InformacionLlegada.html';
+        };
+
+        // 4. CONFIRMAR CANCELACIÓN
+        document.getElementById('confirmCancelBtn').addEventListener('click', async function() {
+            const reason = document.getElementById('cancelReason').value;
+            
+            if (!reason) {
+                alert("Por favor selecciona un motivo.");
+                return;
+            }
+
+            const btn = this;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+
+            try {
+                // Intentar con PATCH primero
+                let response = await fetch(`${API_URL}/pedidos/${currentOrderToCancel}`, {
+                    method: 'PATCH',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        estado: 'cancelado',
+                        motivo_cancelacion: reason,
+                        explicacion: document.getElementById('cancelExplanation').value
+                    })
+                });
+
+                // Si PATCH no funciona, intentar con PUT
+                if (response.status === 405) {
+                    console.log("PATCH no soportado, intentando con PUT");
+                    response = await fetch(`${API_URL}/pedidos/${currentOrderToCancel}`, {
+                        method: 'PUT',
+                        headers: getAuthHeaders(),
+                        body: JSON.stringify({
+                            estado: 'cancelado',
+                            motivo_cancelacion: reason,
+                            explicacion: document.getElementById('cancelExplanation').value
+                        })
+                    });
+                }
+
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log("Respuesta del servidor:", result);
+                    
+                    alert("Pedido cancelado exitosamente.");
+                    modalCancel.hide();
+                    
+                    // Recargar la tabla
+                    await cargarHistorial();
+                } else {
+                    const err = await response.json();
+                    console.error("Error del servidor:", err);
+                    alert("Error: " + (err.detail || "No se pudo cancelar"));
+                }
+
+            } catch (error) {
+                console.error("Error:", error);
+                alert("Error de conexión: " + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Confirmar Cancelación';
+            }
         });
-    });
-</script>
+    </script>
 </body>
 </html>

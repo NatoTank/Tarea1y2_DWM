@@ -1,23 +1,31 @@
-// config.js ACTUALIZADO
-
+// URL de la API
 const API_URL = "http://localhost:8000";
 
+// Función para obtener headers de autenticación
 function getAuthHeaders() {
     const token = localStorage.getItem('token');
     return {
         'Content-Type': 'application/json',
-        ...(token && { 'Authorization': `Bearer ${token}` })
+        'Authorization': `Bearer ${token}`
     };
 }
 
+// Función para guardar token después de login
+function saveToken(token) {
+    localStorage.setItem('token', token);
+}
+
+// Función para verificar si está logueado
+function isLoggedIn() {
+    return localStorage.getItem('token') !== null;
+}
+
+// Función para logout
 function logout() {
-    if(confirm("¿Quieres cerrar tu sesión?")) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('userEmail');
-        localStorage.removeItem('userData');
-        localStorage.removeItem('chocomaniaCart');
-        window.location.href = "Home.html";
-    }
+    localStorage.removeItem('token');
+    localStorage.removeItem('chocomaniaCart');
+    localStorage.removeItem('pendingOrder');
+    window.location.href = 'Inicio.html';
 }
 
 function updateNavbarUI() {
