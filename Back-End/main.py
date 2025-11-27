@@ -602,6 +602,38 @@ def crear_promocion(promo_input: PromocionCreate, admin_user: UsuarioDB = Depend
     db.refresh(nueva_promo)
     return nueva_promo
 
+@app.get("/admin/pedidos/sin-asignar", response_model=List[dict])
+def obtener_pedidos_sin_asignar(
+    admin_user: UsuarioDB = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene todos los pedidos pagados o en preparación sin repartidor asignado.
+    """
+    estados_para_asignar = [EstadoPedido.pagado, EstadoPedido.en_preparacion]
+    
+    pedidos = db.query(PedidoDB).filter(
+        PedidoDB.estado.in_(estados_para_asignar)
+    ).all()
+    
+    result = []
+    for pedido in pedidos:
+        # Verificar si tiene seguimiento y repartidor asignado
+        seguimiento = get_seguimiento_by_pedido_id(db, pedido.id)
+        
+        # Solo incluir si no tiene repartidor asignado
+        if not seguimiento or not seguimiento.repartidor_asignado:
+            cliente = get_usuario_by_id(db, pedido.usuario_id)
+            result.append({
+                "id": pedido.id,
+                "clientName": cliente.nombre if cliente and cliente.nombre else "Cliente",
+                "total": pedido.total,
+                "estado": pedido.estado.value,
+                "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None
+            })
+    
+    return result
+
 @app.get("/promociones/activas", response_model=List[dict])
 def leer_promociones_activas(db: Session = Depends(get_db)):
     """
@@ -631,7 +663,14 @@ def leer_promociones_activas(db: Session = Depends(get_db)):
             continue
         
         descuento = round(((producto.precio - promo.precio_oferta) / producto.precio) * 100)
-        dias_restantes = max((promo.fecha_termino - ahora).days, 0)
+        
+        # ✅ CORREGIR: Asegurar que ambas fechas tengan timezone
+        fecha_termino_aware = promo.fecha_termino
+        if fecha_termino_aware.tzinfo is None:
+            # Si no tiene timezone, asumirlo como UTC
+            fecha_termino_aware = fecha_termino_aware.replace(tzinfo=timezone.utc)
+        
+        dias_restantes = max((fecha_termino_aware - ahora).days, 0)
         
         promo_data = {
             "id": promo.id,
@@ -751,7 +790,7 @@ def vaciar_carrito(
 
 # --- ENDPOINTS DE PAGO Y PEDIDOS ---
 
-# ¡MODIFICADO! (Con el ARREGLO CRÍTICO)
+# ¡MODIFICADO! (Con REDUCCIÓN DE STOCK)
 @app.post("/pedidos/crear-pago-desde-carrito", response_model=dict)
 async def crear_pedido_y_pago_desde_carrito(
     current_user: UsuarioDB = Depends(get_current_user),
@@ -765,12 +804,11 @@ async def crear_pedido_y_pago_desde_carrito(
     # 1. Obtener Carrito
     carrito = get_carrito_by_user_id(db, current_user.id)
     if not carrito or not carrito.items:
-        raise HTTPException(status_code=400, detail="El carrito está vacío") # Gherkin B-08
+        raise HTTPException(status_code=400, detail="El carrito está vacío")
 
     # 2. Validar stock y calcular total
     total_calculado = 0.0
     
-    # (Este primer bucle es solo para validación y calcular el total)
     for item in carrito.items:
         producto = get_producto_by_id(db, item.producto_id)
         if not producto or not producto.activo:
@@ -778,7 +816,11 @@ async def crear_pedido_y_pago_desde_carrito(
         if producto.stock < item.cantidad:
              raise HTTPException(status_code=400, detail=f"No hay stock suficiente de {producto.nombre}")
         
-        promo_activa = db.query(PromocionDB).filter(PromocionDB.producto_id == producto.id, PromocionDB.activo == True, PromocionDB.fecha_termino > datetime.now(timezone.utc)).first()
+        promo_activa = db.query(PromocionDB).filter(
+            PromocionDB.producto_id == producto.id, 
+            PromocionDB.activo == True, 
+            PromocionDB.fecha_termino > datetime.now(timezone.utc)
+        ).first()
         precio_a_cobrar = promo_activa.precio_oferta if promo_activa else producto.precio
         
         total_calculado += precio_a_cobrar * item.cantidad
@@ -790,15 +832,10 @@ async def crear_pedido_y_pago_desde_carrito(
         estado=EstadoPedido.pendiente_de_pago
     )
     db.add(nuevo_pedido_db)
-    
-    # --- ¡AQUÍ ESTÁ EL ARREGLO IMPORTANTE! ---
-    
-    # Hacemos "flush" para obtener el ID del nuevo pedido (nuevo_pedido_db.id)
     db.flush()
 
-    # 3b. (Bucle 2) Ahora copiamos los items del carrito a la tabla de pedidos
+    # 3b. Copiar items del carrito a la tabla de pedidos Y REDUCIR STOCK
     for item in carrito.items:
-        # Volvemos a calcular el precio de este item (para guardarlo en el historial)
         producto = get_producto_by_id(db, item.producto_id)
         promo_activa = db.query(PromocionDB).filter(
             PromocionDB.producto_id == producto.id,
@@ -807,27 +844,30 @@ async def crear_pedido_y_pago_desde_carrito(
         ).first()
         precio_en_el_momento = promo_activa.precio_oferta if promo_activa else producto.precio
         
-        # Insertamos la relación en la tabla asociativa
+        # Insertar en tabla de pedidos
         db.execute(pedido_items_tabla.insert().values(
             pedido_id=nuevo_pedido_db.id,
             producto_id=item.producto_id,
             cantidad=item.cantidad,
             precio_en_el_momento=precio_en_el_momento
         ))
+        
+        # ✅ REDUCIR STOCK DEL PRODUCTO EN LA BASE DE DATOS
+        producto.stock -= item.cantidad
+        print(f"📉 Stock de '{producto.nombre}' reducido de {producto.stock + item.cantidad} a {producto.stock}")
     
-    # --- ¡FIN DEL ARREGLO! ---
-    
-    # 4. Vaciar el carrito (ahora que los items están copiados)
+    # 4. Vaciar el carrito
     db.query(CarritoItemDB).filter(CarritoItemDB.carrito_id == carrito.id).delete()
 
     # 5. Confirmar todos los cambios
     db.commit()
     db.refresh(nuevo_pedido_db)
     
-    # Retornar el ID del pedido creado
+    print(f"✅ Pedido {nuevo_pedido_db.id} creado. Stock actualizado en BD.")
+    
     return {
         "ok": True,
-        "pedido_id": str(nuevo_pedido_db.id),  # ← Asegurar que sea string
+        "pedido_id": str(nuevo_pedido_db.id),
         "redirect_url": f"ConfirmacionPago.html?order_id={nuevo_pedido_db.id}"
     }
 
@@ -948,7 +988,6 @@ async def marcar_pedido_pagado(
         raise HTTPException(status_code=403, detail="No tienes permiso para este pedido")
     
     if pedido.estado != EstadoPedido.pendiente_de_pago:
-        # Si ya está pagado, retornar éxito igual
         return {
             "mensaje": "Pedido ya procesado",
             "estado": pedido.estado.value,
@@ -978,16 +1017,104 @@ async def marcar_pedido_pagado(
     db.commit()
     db.refresh(pedido)
     
-    # Enviar email de confirmación
+    # --- ✅ ENVIAR EMAIL CON DETALLE COMPLETO DE PRODUCTOS ---
+    items_pedido = db.execute(
+        pedido_items_tabla.select().where(pedido_items_tabla.c.pedido_id == pedido.id)
+    ).fetchall()
+    
+    productos_html = ""
+    for item in items_pedido:
+        producto = get_producto_by_id(db, item.producto_id)
+        if producto:
+            subtotal = item.precio_en_el_momento * item.cantidad
+            productos_html += f"""
+            <tr>
+                <td style="padding: 12px; border-bottom: 1px solid #ddd;">{producto.nombre}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #ddd; text-align: center;">{item.cantidad}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #ddd; text-align: right;">${item.precio_en_el_momento:,.0f}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #ddd; text-align: right; font-weight: bold;">${subtotal:,.0f}</td>
+            </tr>
+            """
+    
+    nombre_cliente = current_user.nombre if current_user.nombre else current_user.email.split('@')[0]
+    
     cuerpo_html = f"""
-    <h1>¡Tu pago ha sido aprobado!</h1>
-    <p>Hola {current_user.nombre or current_user.email},</p>
-    <p>Tu pago para el pedido <strong>Nº {pedido.id}</strong> por un total de <strong>${pedido.total}</strong> ha sido procesado.</p>
-    <p>Ya estamos preparando tus chocolates.</p>
-    <p>¡Gracias por tu compra!</p>
+    <html>
+    <body style="font-family: Arial, sans-serif; background-color: #f8f9fa; padding: 20px; margin: 0;">
+        <div style="max-width: 650px; margin: 0 auto; background: white; border-radius: 15px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+            
+            <div style="background: linear-gradient(135deg, #7B3F00, #5a2e00); padding: 40px 30px; text-align: center; position: relative;">
+                <div style="background: white; width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+                    <span style="font-size: 60px;">🍫</span>
+                </div>
+                <h1 style="color: white; margin: 0; font-size: 32px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">CHOCOMANÍA</h1>
+                <p style="color: #f8f9fa; margin: 10px 0 0 0; font-size: 16px; letter-spacing: 1px;">Chocolatería Artesanal</p>
+            </div>
+            
+            <div style="padding: 40px 30px;">
+                <h2 style="color: #28a745; text-align: center; margin-bottom: 20px;">¡Pedido Confirmado!</h2>
+                
+                <p style="font-size: 16px; color: #333; margin-bottom: 10px;"><strong>Hola {nombre_cliente},</strong></p>
+                <p style="font-size: 15px; color: #666; line-height: 1.6; margin-bottom: 30px;">
+                    Tu pago ha sido procesado exitosamente. Ya estamos preparando tus deliciosos chocolates artesanales.
+                </p>
+                
+                <div style="background: #f8f9fa; border-radius: 10px; padding: 20px; margin-bottom: 30px;">
+                    <h3 style="color: #7B3F00; margin-top: 0;">📦 Información del Pedido</h3>
+                    <p style="margin: 5px 0;"><strong>Número:</strong> #{pedido.id}</p>
+                    <p style="margin: 5px 0;"><strong>Fecha:</strong> {pedido.fecha_creacion.strftime('%d/%m/%Y %H:%M') if pedido.fecha_creacion else 'N/A'}</p>
+                    <p style="margin: 5px 0;"><strong>Estado:</strong> <span style="color: #28a745; font-weight: bold;">PAGADO</span></p>
+                </div>
+                
+                <h3 style="color: #7B3F00; margin-bottom: 15px;">🍫 Detalle de tu Compra</h3>
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                    <thead>
+                        <tr style="background: #7B3F00; color: white;">
+                            <th style="padding: 12px; text-align: left;">Producto</th>
+                            <th style="padding: 12px; text-align: center;">Cant.</th>
+                            <th style="padding: 12px; text-align: right;">Precio</th>
+                            <th style="padding: 12px; text-align: right;">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {productos_html}
+                    </tbody>
+                    <tfoot>
+                        <tr style="background: #f8f9fa;">
+                            <td colspan="3" style="padding: 15px; text-align: right; font-weight: bold; font-size: 16px;">TOTAL:</td>
+                            <td style="padding: 15px; text-align: right; font-weight: bold; font-size: 18px; color: #28a745;">${pedido.total:,.0f}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+                
+                <div style="background: #e7f3ff; border-left: 4px solid #007bff; padding: 15px, margin: 20px 0;">
+                    <h4 style="color: #007bff; margin: 0 0 10px 0;">🚚 Información de Entrega</h4>
+                    <p style="margin: 5px 0; color: #666;"><strong>📍 Dirección:</strong> {current_user.direccion if current_user.direccion else 'Por confirmar'}</p>
+                    <p style="margin: 5px 0; color: #666;"><strong>📞 Teléfono:</strong> {current_user.telefono if current_user.telefono else 'Por confirmar'}</p>
+                    <p style="margin: 10px 0 0 0; color: #007bff;"><em>⏱️ Tiempo estimado: 1 hora</em></p>
+                </div>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <p style="font-size: 18px; color: #7B3F00; font-weight: bold;">¡Gracias por tu compra!</p>
+                    <p style="color: #666; font-size: 14px;">Te esperamos pronto con más delicias de chocolate 🍫</p>
+                </div>
+            </div>
+            
+            <div style="background: linear-gradient(135deg, #7B3F00, #5a2e00); padding: 25px 30px; text-align: center;">
+                <p style="margin: 0; color: white; font-size: 14px; font-weight: bold;">CHOCOLATERÍA CHOCOMANIA</p>
+                <p style="margin: 5px 0; color: #f8f9fa; font-size: 12px;">
+                    <a href="https://www.chocomania.cl" style="color: #f8f9fa; text-decoration: none;">www.chocomania.cl</a> | 
+                    <a href="mailto:contacto@chocomania.cl" style="color: #f8f9fa; text-decoration: none;">contacto@chocomania.cl</a>
+                </p>
+                <p style="margin: 5px 0; color: #f8f9fa; font-size: 12px;">📍 Av. Chocolate 123, Santiago | 📞 +56 9 1234 5678</p>
+            </div>
+        </div>
+    </body>
+    </html>
     """
+    
     await enviar_email_async(
-        asunto=f"Confirmación de Pedido Chocomanía Nº {pedido.id}",
+        asunto=f"✅ Confirmación de Pedido Chocomanía Nº {pedido.id}",
         email_destinatario=current_user.email,
         cuerpo_html=cuerpo_html
     )
@@ -997,83 +1124,6 @@ async def marcar_pedido_pagado(
         "estado": "pagado",
         "pedido_id": pedido.id
     }
-
-# ¡NUEVO! Schema para actualizar estado de pedido
-class EstadoPedidoInput(BaseModel):
-    estado: EstadoPedido
-
-# ¡NUEVO ENDPOINT! PUT para actualizar estado de pedido
-@app.put("/pedidos/{pedido_id}", response_model=PedidoSchema)
-def actualizar_estado_pedido(
-    pedido_id: int,
-    estado_input: EstadoPedidoInput,
-    current_user: UsuarioDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Actualiza el estado de un pedido.
-    """
-    pedido = get_pedido_by_id(db, pedido_id)
-    if not pedido:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    
-    # Verificar permisos
-    if current_user.rol != Roles.administrador and pedido.usuario_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No tienes permiso para modificar este pedido")
-    
-    # Actualizar estado
-    pedido.estado = estado_input.estado
-    db.commit()
-    db.refresh(pedido)
-    
-    print(f"Pedido {pedido_id} actualizado a estado: {estado_input.estado.value}")
-    return pedido
-
-# ¡NUEVO ENDPOINT! PATCH para actualizar estado de pedido
-@app.patch("/pedidos/{pedido_id}", response_model=PedidoSchema)
-def actualizar_pedido_parcial(
-    pedido_id: int,
-    estado_input: EstadoPedidoInput,
-    current_user: UsuarioDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Actualiza parcialmente un pedido (PATCH).
-    """
-    return actualizar_estado_pedido(pedido_id, estado_input, current_user, db)
-
-# ¡NUEVO ENDPOINT! Obtener pedidos sin repartidor asignado (Admin)
-@app.get("/admin/pedidos/sin-asignar", response_model=List[dict])
-def obtener_pedidos_sin_asignar(
-    admin_user: UsuarioDB = Depends(get_current_admin_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Obtiene todos los pedidos pagados o en preparación sin repartidor asignado.
-    """
-    estados_para_asignar = [EstadoPedido.pagado, EstadoPedido.en_preparacion]
-    
-    pedidos = db.query(PedidoDB).filter(
-        PedidoDB.estado.in_(estados_para_asignar)
-    ).all()
-    
-    result = []
-    for pedido in pedidos:
-        # Verificar si tiene seguimiento y repartidor asignado
-        seguimiento = get_seguimiento_by_pedido_id(db, pedido.id)
-        
-        # Solo incluir si no tiene repartidor asignado
-        if not seguimiento or not seguimiento.repartidor_asignado:
-            cliente = get_usuario_by_id(db, pedido.usuario_id)
-            result.append({
-                "id": pedido.id,
-                "clientName": cliente.nombre if cliente and cliente.nombre else "Cliente",
-                "total": pedido.total,
-                "estado": pedido.estado.value,
-                "fecha_creacion": pedido.fecha_creacion.isoformat() if pedido.fecha_creacion else None
-            })
-    
-    return result
 
 # ¡NUEVO SCHEMA! Para asignar repartidor
 class AsignarRepartidorInput(BaseModel):
@@ -1232,6 +1282,44 @@ def marcar_pedido_en_camino(
     return {
         "mensaje": f"Pedido #{pedido_id} está en camino",
         "estado": "despachado",
+        "pedido_id": pedido_id
+    }
+
+# Después del endpoint marcar_pedido_en_camino, agregar:
+
+@app.put("/seguimiento/{pedido_id}/entregar", response_model=dict)
+def marcar_pedido_entregado(
+    pedido_id: int,
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Marca un pedido como entregado.
+    Solo para repartidores o admin.
+    """
+    if current_user.rol not in [Roles.repartidor, Roles.administrador]:
+        raise HTTPException(status_code=403, detail="Solo repartidores o admin pueden marcar entregas")
+    
+    pedido = get_pedido_by_id(db, pedido_id)
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    # Cambiar estado del pedido a entregado
+    pedido.estado = EstadoPedido.entregado
+    
+    # Actualizar seguimiento
+    seguimiento = get_seguimiento_by_pedido_id(db, pedido_id)
+    if seguimiento:
+        seguimiento.estado = EstadoSeguimiento.entregado
+    
+    db.commit()
+    db.refresh(pedido)
+    
+    print(f"✅ Pedido {pedido_id} marcado como ENTREGADO por {current_user.email}")
+    
+    return {
+        "mensaje": f"Pedido #{pedido_id} entregado exitosamente",
+        "estado": "entregado",
         "pedido_id": pedido_id
     }
 
@@ -1540,7 +1628,7 @@ async def enviar_documento_por_email(
             <p>Adjuntamos tu {doc_tipo} digital correspondiente a la compra realizada.</p>
             
             <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                <h3 style="color: #7B3F00; margin-top: 0;">Detalles de la {doc_tipo.lower()}:</h3>
+                <h3 style="color: #7B3F00; margin-top: 0;">📦 Detalles de tu {doc_tipo.lower()}:</h3>
                 <ul style="list-style: none; padding: 0;">
                     <li><strong>N° Pedido:</strong> #{pedido_id}</li>
                     <li><strong>Fecha:</strong> {pedido.fecha_creacion.strftime('%d/%m/%Y %H:%M') if pedido.fecha_creacion else 'N/A'}</li>
@@ -1568,8 +1656,7 @@ async def enviar_documento_por_email(
             
             <p><em>Este documento es válido para todos los efectos tributarios.</em></p>
             
-            <p style="margin-top: 30px;"><strong>¡Gracias por tu compra!</strong></p>
-            <p style="color: #666;"><em>Equipo Chocomanía</em></p>
+            <p style="margin-top: 30px;"><strong>¡Gracias por tu compra!</strong></p            <p style="color: #666; font-size: 14px;">Te esperamos pronto con más delicias de chocolate 🍫</p>
             
             <hr style="border: 1px solid #ddd; margin-top: 30px;">
             <p style="text-align: center; color: #999; font-size: 12px;">
@@ -1594,4 +1681,82 @@ async def enviar_documento_por_email(
         "mensaje": f"{doc_tipo} enviada exitosamente",
         "email": current_user.email,
         "pedido_id": pedido_id
+    }
+
+# --- 10.1 ENDPOINTS DE SEGUIMIENTO ---
+
+@app.put("/seguimiento/{pedido_id}/reportar-problema", response_model=dict)
+def reportar_problema_entrega(
+    pedido_id: int,
+    descripcion: str,
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Reporta un problema con la entrega de un pedido.
+    Solo el repartidor asignado o un administrador pueden reportar problemas.
+    """
+    pedido = get_pedido_by_id(db, pedido_id)
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    seguimiento = get_seguimiento_by_pedido_id(db, pedido_id)
+    if not seguimiento:
+        raise HTTPException(status_code=404, detail="Seguimiento no encontrado para este pedido")
+    
+    # Verificar que el repartidor actual es el asignado
+    if current_user.rol == Roles.repartidor:
+        if seguimiento.repartidor_asignado != (current_user.nombre or current_user.email):
+            raise HTTPException(status_code=403, detail="No tienes permiso para reportar problemas en este pedido")
+    
+    # Actualizar estado a "Problema Reportado"
+    seguimiento.estado = EstadoSeguimiento.problema_reportado
+    db.commit()
+    db.refresh(seguimiento)
+    
+    # Notificar al administrador (puedes implementar una lógica de notificación aquí)
+    print(f"⚠️ Problema reportado para el pedido {pedido_id}: {descripcion}")
+    
+    return {
+        "mensaje": "Problema reportado exitosamente",
+        "pedido_id": pedido_id,
+        "estado": seguimiento.estado.value
+    }
+
+# Después de @app.put("/seguimiento/{pedido_id}/reportar-problema"), agregar:
+
+@app.patch("/pedidos/{pedido_id}", response_model=dict)
+def actualizar_pedido_parcial(
+    pedido_id: int,
+    motivo_cancelacion: str = None,
+    current_user: UsuarioDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Actualiza parcialmente un pedido (principalmente para cancelaciones con motivo).
+    """
+    pedido = get_pedido_by_id(db, pedido_id)
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    # Verificar permisos
+    if pedido.usuario_id != current_user.id and current_user.rol != Roles.administrador:
+        raise HTTPException(status_code=403, detail="No tienes permiso para modificar este pedido")
+    
+    # Solo permitir cancelación si el pedido no está despachado
+    if pedido.estado in [EstadoPedido.despachado, EstadoPedido.entregado]:
+        raise HTTPException(status_code=400, detail="No se puede cancelar un pedido ya despachado o entregado")
+    
+    # Cancelar pedido
+    pedido.estado = EstadoPedido.cancelado
+    db.commit()
+    db.refresh(pedido)
+    
+    print(f"❌ Pedido {pedido_id} cancelado. Motivo: {motivo_cancelacion or 'No especificado'}")
+    
+    return {
+        "mensaje": "Pedido cancelado exitosamente",
+        "pedido_id": pedido_id,
+        "estado": pedido.estado.value,
+        "motivo": motivo_cancelacion
     }

@@ -7,6 +7,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="config.js"></script>
   <style>
     body {
       background-color: #f8f9fa;
@@ -219,6 +220,11 @@
       animation: slideIn 0.3s ease-out;
     }
     
+    /* ✅ AGREGAR ESTA CLASE QUE FALTABA */
+    .cart-notification.show {
+      display: block !important;
+    }
+    
     @keyframes slideIn {
       from { transform: translateX(100%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
@@ -350,14 +356,9 @@
       <div class="col-lg-9 col-md-8">
         <!-- Filtros Activos -->
         <div class="active-filters" id="activeFilters" style="display: none;">
-          <div class="d-flex justify-content-between align-items-center">
-            <div>
-              <strong>FILTROS APLICADOS:</strong>
-              <span id="activeFiltersList"></span>
-            </div>
-            <a class="clear-filters" id="clearAllFilters">
-              <i class="fas fa-times"></i> Limpiar todos
-            </a>
+          <div>
+            <strong>FILTROS APLICADOS:</strong>
+            <span id="activeFiltersList"></span>
           </div>
         </div>
 
@@ -402,388 +403,287 @@
   </div>
 
   <script>
-    // Datos de ejemplo para el catálogo
-    const products = [
-      { 
-        id: 1, 
-        name: "Bombones Surtidos", 
-        price: 12990, 
-        category: "Bombones",
-        type: "Bombones Surtidos",
-        image: "Bombones.png"
-      },
-      { 
-        id: 2, 
-        name: "Bombones Especiales", 
-        price: 15990, 
-        category: "Bombones",
-        type: "Bombones Especiales",
-        image: "BombonesBlanco.png"
-      },
-      { 
-        id: 3, 
-        name: "Bombones de Licor", 
-        price: 15990, 
-        category: "Bombones",
-        type: "Bombones de Licor",
-        image: "Bombones.png"
-      },
-      { 
-        id: 4, 
-        name: "Tableta Chocolate Negro", 
-        price: 7990, 
-        category: "Tabletas",
-        type: "Tabletas",
-        image: "ChocolateAvenida.png"
-      },
-      { 
-        id: 5, 
-        name: "Tableta Chocolate con Leche", 
-        price: 6990, 
-        category: "Tabletas",
-        type: "Tabletas",
-        image: "ChocolateLeche.png"
-      },
-      { 
-        id: 6, 
-        name: "Alfajores Clásicos", 
-        price: 8990, 
-        category: "Alfajores",
-        type: "Alfajores",
-        image: "Alfajores.png"
-      },
-      { 
-        id: 7, 
-        name: "Macaroons Surtdos", 
-        price: 12990, 
-        category: "Macaroons",
-        type: "Macaroons",
-        image: "Macaroons.png"
-      },
-      { 
-        id: 8, 
-        name: "Bombones Premium", 
-        price: 18990, 
-        category: "Bombones",
-        type: "Bombones Especiales",
-        image: "BombonesBlanco.png"
+    // Variables globales
+    let allProducts = [];
+    let filteredProducts = [];
+
+    // ✅ FUNCIÓN PARA OBTENER IMAGEN ESPECÍFICA POR NOMBRE DE PRODUCTO
+    function getProductImage(nombre) {
+      const nombreLower = nombre.toLowerCase();
+      
+      // Mapeo exacto nombre → imagen
+      if (nombreLower.includes('chocolate avenida')) return 'ChocolateAvenida.png';
+      if (nombreLower.includes('chocolate con leche')) return 'ChocolateLeche.png';
+      if (nombreLower.includes('chocolate blanco') && !nombreLower.includes('bombones')) return 'ChocolateBlanco.png';
+      if (nombreLower.includes('chocolate con almendras')) return 'ChocolateAlmendras.png';
+      if (nombreLower.includes('bombones chocolate negro')) return 'Bombones.png';
+      if (nombreLower.includes('bombones chocolate blanco')) return 'BombonesBlanco.png';
+      if (nombreLower.includes('alfajor')) return 'Alfajores.png';
+      if (nombreLower.includes('macaroon')) return 'Macaroons.png';
+      
+      // Por defecto
+      return 'ChocolateLeche.png';
+    }
+
+    // ✅ CARGAR PRODUCTOS (MISMA API)
+    async function loadProductsFromAPI() {
+      try {
+        console.log("🔍 Cargando productos desde /productos/...");
+        console.log("API_URL:", API_URL);
+        
+        const response = await fetch(`${API_URL}/productos/`);
+        
+        console.log("Response status:", response.status);
+        
+        if (response.ok) {
+          allProducts = await response.json();
+          console.log("✅ Productos cargados:", allProducts.length, allProducts);
+          
+          filteredProducts = [...allProducts];
+          renderProducts();
+          updateResultsCount();
+        } else {
+          console.error("Error:", response.status);
+          document.getElementById('resultsCount').textContent = 'Error al cargar';
+          document.getElementById('emptyCatalog').style.display = 'block';
+          document.getElementById('productsCatalog').style.display = 'none';
+        }
+      } catch (error) {
+        console.error("Error de conexión:", error);
+        document.getElementById('resultsCount').textContent = 'Error de conexión: ' + error.message;
+        document.getElementById('emptyCatalog').style.display = 'block';
+        document.getElementById('productsCatalog').style.display = 'none';
       }
-    ];
-
-    // Variables para paginación y filtros
-    const productsPerPage = 6;
-    let currentPage = 1;
-    let filteredProducts = [...products];
-    let imageCache = new Map();
-    let activeFilters = {
-      categories: [],
-      types: [],
-      priceRanges: []
-    };
-
-    // Función para obtener el carrito desde localStorage
-    function getCart() {
-      const cart = localStorage.getItem('chocomaniaCart');
-      return cart ? JSON.parse(cart) : [];
     }
 
-    // Función para actualizar el badge del carrito
-    function updateCartBadge() {
-      const cart = getCart();
-      const totalItems = cart.reduce((total, item) => total + item.quantity, 0);
-      document.getElementById('cartBadge').textContent = totalItems;
-    }
-
-    // Función para mostrar notificación
-    function showNotification(message) {
-      const notification = document.getElementById('cartNotification');
-      const messageElement = document.getElementById('notificationMessage');
-      
-      messageElement.textContent = message;
-      notification.style.display = 'block';
-      
-      setTimeout(() => {
-        notification.style.display = 'none';
-      }, 3000);
-    }
-
-    // Función para agregar producto al carrito
-    function addToCart(productId) {
-      const cart = getCart();
-      const product = products.find(p => p.id === productId);
-      
-      if (!product) return;
-      
-      // Verificar si el producto ya está en el carrito
-      const existingItem = cart.find(item => item.id === productId);
-      
-      if (existingItem) {
-        existingItem.quantity += 1;
-      } else {
-        cart.push({
-          id: product.id,
-          name: product.name,
-          price: product.price,
-          image: product.image,
-          quantity: 1
-        });
-      }
-      
-      // Guardar en localStorage
-      localStorage.setItem('chocomaniaCart', JSON.stringify(cart));
-      
-      // Actualizar badge
-      updateCartBadge();
-      
-      // Mostrar notificación
-      showNotification(`${product.name} agregado al carrito`);
-    }
-
-    // Función para formatear precio en CLP
-    function formatPrice(price) {
-      return new Intl.NumberFormat('es-CL', {
-        style: 'currency',
-        currency: 'CLP',
-        minimumFractionDigits: 0
-      }).format(price);
-    }
-
-    // Función para cargar imagen con cache
-    function loadImage(imgElement, src, productId) {
-      if (imageCache.has(src)) {
-        imgElement.src = src;
-        imgElement.classList.remove('loading');
-        imgElement.classList.add('loaded');
-        return;
-      }
-
-      imgElement.classList.add('loading');
-      
-      const tempImage = new Image();
-      tempImage.onload = function() {
-        imageCache.set(src, true);
-        imgElement.src = src;
-        imgElement.classList.remove('loading');
-        imgElement.classList.add('loaded');
-      };
-      tempImage.onerror = function() {
-        imgElement.classList.remove('loading');
-        imgElement.parentElement.innerHTML = '<div class="image-placeholder"><i class="fas fa-cube"></i></div>';
-      };
-      tempImage.src = src;
-    }
-
-    // Función para aplicar filtros
+    // ✅ CORREGIR FUNCIÓN DE FILTROS
     function applyFilters() {
-      const selectedCategories = Array.from(document.querySelectorAll('input[value="Bombones"], input[value="Tabletas"], input[value="Alfajores"], input[value="Macaroons"]:checked')).map(cb => cb.value);
-      const selectedTypes = Array.from(document.querySelectorAll('input[value="Bombones Surtidos"], input[value="Bombones Especiales"], input[value="Bombones de Licor"]:checked')).map(cb => cb.value);
+      console.log("🔍 Aplicando filtros...");
       
-      // Actualizar filtros activos
-      activeFilters.categories = selectedCategories;
-      activeFilters.types = selectedTypes;
+      // Obtener categorías principales seleccionadas (Bombones, Tabletas, Alfajores, Macaroons)
+      const selectedCategories = [];
+      if (document.getElementById('filter-bombones').checked) selectedCategories.push('Bombones');
+      if (document.getElementById('filter-tabletas').checked) selectedCategories.push('Tabletas');
+      if (document.getElementById('filter-alfajores').checked) selectedCategories.push('Alfajores');
+      if (document.getElementById('filter-macaroons').checked) selectedCategories.push('Macaroons');
       
-      // Aplicar filtros a los productos
-      filteredProducts = products.filter(product => {
-        // Filtro por categoría
-        const categoryMatch = selectedCategories.length === 0 || selectedCategories.includes(product.category);
+      // Obtener subcategorías de bombones
+      const selectedBombonesTypes = [];
+      if (document.getElementById('filter-bombones-surtidos').checked) selectedBombonesTypes.push('Bombones Surtidos');
+      if (document.getElementById('filter-bombones-especiales').checked) selectedBombonesTypes.push('Bombones Especiales');
+      if (document.getElementById('filter-bombones-licor').checked) selectedBombonesTypes.push('Bombones de Licor');
+      
+      // Obtener rangos de precio seleccionados
+      const selectedPrices = [];
+      if (document.getElementById('filter-precio-1').checked) selectedPrices.push('precio-0-5000');
+      if (document.getElementById('filter-precio-2').checked) selectedPrices.push('precio-5000-10000');
+      if (document.getElementById('filter-precio-3').checked) selectedPrices.push('precio-10000-15000');
+      if (document.getElementById('filter-precio-4').checked) selectedPrices.push('precio-15000+');
+      
+      console.log("Categorías seleccionadas:", selectedCategories);
+      console.log("Tipos de bombones:", selectedBombonesTypes);
+      console.log("Rangos de precio:", selectedPrices);
+      
+      filteredProducts = allProducts.filter(product => {
+        // ✅ FILTRO DE CATEGORÍA PRINCIPAL
+        let matchesCategory = true;
+        if (selectedCategories.length > 0) {
+          // Verificar si el tipo del producto coincide EXACTAMENTE con alguna categoría seleccionada
+          matchesCategory = selectedCategories.some(cat => {
+            const productType = product.tipo.toLowerCase();
+            const category = cat.toLowerCase();
+            
+            // Si es Bombones, verificar subcategorías si hay seleccionadas
+            if (category === 'bombones') {
+              if (selectedBombonesTypes.length > 0) {
+                return selectedBombonesTypes.some(subType => 
+                  productType.includes(subType.toLowerCase())
+                );
+              }
+              // Si no hay subcategorías, aceptar cualquier bombón
+              return productType.includes('bombon');
+            }
+            
+            // Para Tabletas, Alfajores, Macaroons: coincidencia exacta
+            return productType.includes(category);
+          });
+        }
         
-        // Filtro por tipo
-        const typeMatch = selectedTypes.length === 0 || selectedTypes.includes(product.type);
+        // ✅ FILTRO DE PRECIO
+        let matchesPrice = true;
+        if (selectedPrices.length > 0) {
+          matchesPrice = selectedPrices.some(priceRange => {
+            const precio = product.precio;
+            
+            if (priceRange === 'precio-0-5000') {
+              return precio >= 0 && precio <= 5000;
+            } else if (priceRange === 'precio-5000-10000') {
+              return precio > 5000 && precio <= 10000;
+            } else if (priceRange === 'precio-10000-15000') {
+              return precio > 10000 && precio <= 15000;
+            } else if (priceRange === 'precio-15000+') {
+              return precio > 15000;
+            }
+            return false;
+          });
+        }
         
-        return categoryMatch && typeMatch;
+        // Debe cumplir AMBOS filtros (categoría Y precio)
+        return matchesCategory && matchesPrice;
       });
       
-      currentPage = 1;
-      updateActiveFiltersDisplay();
+      console.log(`✅ ${filteredProducts.length} productos después de filtros`, filteredProducts);
+      
       renderProducts();
+      updateResultsCount();
+      updateActiveFilters(selectedCategories, selectedBombonesTypes, selectedPrices);
     }
 
-    // Función para actualizar display de filtros activos
-    function updateActiveFiltersDisplay() {
-      const activeFiltersContainer = document.getElementById('activeFilters');
-      const activeFiltersList = document.getElementById('activeFiltersList');
-      const resultsCount = document.getElementById('resultsCount');
+    // ✅ AGREGAR FUNCIÓN PARA MOSTRAR FILTROS ACTIVOS
+    function updateActiveFilters(categories, bombonesTypes, prices) {
+      const activeFiltersDiv = document.getElementById('activeFilters');
+      const filtersList = document.getElementById('activeFiltersList');
       
-      const allFilters = [...activeFilters.categories, ...activeFilters.types];
+      const allFilters = [...categories, ...bombonesTypes];
+      
+      // Agregar etiquetas de precio
+      prices.forEach(p => {
+        if (p === 'precio-0-5000') allFilters.push('$0 - $5.000');
+        else if (p === 'precio-5000-10000') allFilters.push('$5.000 - $10.000');
+        else if (p === 'precio-10000-15000') allFilters.push('$10.000 - $15.000');
+        else if (p === 'precio-15000+') allFilters.push('$15.000+');
+      });
       
       if (allFilters.length > 0) {
-        activeFiltersContainer.style.display = 'block';
-        activeFiltersList.innerHTML = allFilters.map(filter => 
-          `<span class="filter-tag">${filter} <span class="remove" onclick="removeFilter('${filter}')">×</span></span>`
+        activeFiltersDiv.style.display = 'block';
+        filtersList.innerHTML = allFilters.map(f => 
+          `<span class="filter-tag">${f} <span class="remove" onclick="removeFilter('${f}')">×</span></span>`
         ).join('');
-        
-        // Actualizar contador de resultados
-        resultsCount.textContent = `${filteredProducts.length} producto(s) encontrado(s)`;
       } else {
-        activeFiltersContainer.style.display = 'none';
-        resultsCount.textContent = `${products.length} productos en total`;
+        activeFiltersDiv.style.display = 'none';
       }
     }
 
-    // Función para remover filtro individual
-    function removeFilter(filter) {
-      // Remover de categorías
-      const categoryIndex = activeFilters.categories.indexOf(filter);
-      if (categoryIndex > -1) {
-        activeFilters.categories.splice(categoryIndex, 1);
-        const checkbox = document.querySelector(`input[value="${filter}"]`);
-        if (checkbox) checkbox.checked = false;
-      }
-      
-      // Remover de tipos
-      const typeIndex = activeFilters.types.indexOf(filter);
-      if (typeIndex > -1) {
-        activeFilters.types.splice(typeIndex, 1);
-        const checkbox = document.querySelector(`input[value="${filter}"]`);
-        if (checkbox) checkbox.checked = false;
-      }
-      
-      applyFilters();
-    }
-
-    // Función para limpiar todos los filtros
-    function clearAllFilters() {
-      // Desmarcar todos los checkboxes
-      document.querySelectorAll('.form-check-input:checked').forEach(checkbox => {
-        checkbox.checked = false;
-      });
-      
-      // Limpiar filtros activos
-      activeFilters.categories = [];
-      activeFilters.types = [];
-      activeFilters.priceRanges = [];
-      
-      // Resetear productos
-      filteredProducts = [...products];
-      currentPage = 1;
-      
-      updateActiveFiltersDisplay();
-      renderProducts();
-    }
-
-    // Función para renderizar productos
     function renderProducts() {
       const container = document.getElementById('productsContainer');
+      const emptyCatalog = document.getElementById('emptyCatalog');
+      const productsCatalog = document.getElementById('productsCatalog');
+      
       container.innerHTML = '';
       
-      const startIndex = (currentPage - 1) * productsPerPage;
-      const endIndex = startIndex + productsPerPage;
-      const productsToShow = filteredProducts.slice(startIndex, endIndex);
-      
-      if (productsToShow.length === 0) {
-        document.getElementById('productsCatalog').style.display = 'none';
-        document.getElementById('emptyCatalog').style.display = 'block';
+      if (filteredProducts.length === 0) {
+        productsCatalog.style.display = 'none';
+        emptyCatalog.style.display = 'block';
         return;
       }
       
-      document.getElementById('productsCatalog').style.display = 'block';
-      document.getElementById('emptyCatalog').style.display = 'none';
+      productsCatalog.style.display = 'block';
+      emptyCatalog.style.display = 'none';
       
-      // Crear tarjetas de productos
-      productsToShow.forEach(product => {
+      filteredProducts.forEach(product => {
         const col = document.createElement('div');
-        col.className = 'col-md-4 col-sm-6';
+        col.className = 'col-md-4 col-sm-6 mb-4';
+        const imagenProducto = getProductImage(product.nombre); // ✅ Usar nombre, no tipo
         
         col.innerHTML = `
           <div class="card product-card">
             <div class="product-image-container">
-              <img class="product-image loading" 
-                   id="img-${product.id}" 
-                   alt="${product.name}"
-                   loading="lazy">
+              <img class="product-image" src="${imagenProducto}" alt="${product.nombre}">
             </div>
             <div class="card-body">
-              <h5 class="product-title">${product.name}</h5>
-              <div class="product-category">${product.type}</div>
-              <div class="product-price">${formatPrice(product.price)}</div>
-              <button class="btn btn-choco mt-2 w-100 add-to-cart-btn" data-product-id="${product.id}">
+              <h5 class="product-title">${product.nombre}</h5>
+              <div class="product-category">${product.tipo}</div>
+              <div class="product-price">$${product.precio.toLocaleString('es-CL')}</div>
+              <p class="text-muted">${product.descripcion || 'Delicioso chocolate'}</p>
+              <button class="btn btn-choco mt-2 w-100" onclick="addToCart(${product.id}, '${product.nombre}', ${product.precio})">
                 <i class="fas fa-shopping-cart"></i> Agregar al carrito
               </button>
             </div>
           </div>
         `;
-        
         container.appendChild(col);
-        
-        // Cargar la imagen después de crear el elemento
-        const imgElement = document.getElementById(`img-${product.id}`);
-        if (imgElement) {
-          loadImage(imgElement, product.image, product.id);
-        }
-      });
-      
-      // Agregar event listeners a los botones de carrito
-      document.querySelectorAll('.add-to-cart-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-          const productId = parseInt(this.getAttribute('data-product-id'));
-          addToCart(productId);
-        });
-      });
-      
-      // Actualizar paginación
-      renderPagination();
-    }
-
-    // Función para renderizar paginación
-    function renderPagination() {
-      const totalPages = Math.ceil(filteredProducts.length / productsPerPage);
-      const paginationContainer = document.getElementById('pagination');
-      paginationContainer.innerHTML = '';
-      
-      if (totalPages <= 1) return;
-      
-      // Botón anterior
-      const prevLi = document.createElement('li');
-      prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
-      prevLi.innerHTML = `<a class="page-link" href="#" data-page="${currentPage - 1}">Anterior</a>`;
-      paginationContainer.appendChild(prevLi);
-      
-      // Números de página
-      const maxVisiblePages = 5;
-      let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
-      let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-      
-      if (endPage - startPage + 1 < maxVisiblePages) {
-        startPage = Math.max(1, endPage - maxVisiblePages + 1);
-      }
-      
-      for (let i = startPage; i <= endPage; i++) {
-        const li = document.createElement('li');
-        li.className = `page-item ${i === currentPage ? 'active' : ''}`;
-        li.innerHTML = `<a class="page-link" href="#" data-page="${i}">${i}</a>`;
-        paginationContainer.appendChild(li);
-      }
-      
-      // Botón siguiente
-      const nextLi = document.createElement('li');
-      nextLi.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
-      nextLi.innerHTML = `<a class="page-link" href="#" data-page="${currentPage + 1}">Siguiente</a>`;
-      paginationContainer.appendChild(nextLi);
-      
-      // Añadir event listeners
-      document.querySelectorAll('.page-link').forEach(link => {
-        link.addEventListener('click', function(e) {
-          e.preventDefault();
-          const page = parseInt(this.getAttribute('data-page'));
-          if (page && page !== currentPage && page >= 1 && page <= totalPages) {
-            currentPage = page;
-            renderProducts();
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }
-        });
       });
     }
 
-    // Inicializar eventos
-    document.getElementById('applyFilters').addEventListener('click', applyFilters);
-    document.getElementById('clearFilters').addEventListener('click', clearAllFilters);
-    document.getElementById('clearAllFilters').addEventListener('click', clearAllFilters);
-    document.getElementById('resetFilters').addEventListener('click', clearAllFilters);
+    function updateResultsCount() {
+      const count = filteredProducts.length;
+      const total = allProducts.length;
+      document.getElementById('resultsCount').textContent = `${count} producto(s) de ${total}`;
+    }
 
-    // Inicializar catálogo y carrito
-    updateCartBadge();
-    updateActiveFiltersDisplay();
-    renderProducts();
+    function clearAllFilters() {
+      document.querySelectorAll('.form-check-input:checked').forEach(cb => cb.checked = false);
+      filteredProducts = [...allProducts];
+      renderProducts();
+      updateResultsCount();
+      
+      // ✅ OCULTAR LA BARRA DE FILTROS ACTIVOS
+      document.getElementById('activeFilters').style.display = 'none';
+      document.getElementById('activeFiltersList').innerHTML = '';
+    }
+
+    function addToCart(productId, name, price) {
+      const cart = JSON.parse(localStorage.getItem('chocomaniaCart')) || [];
+      const existingProduct = cart.find(item => item.id == productId);
+      
+      if (existingProduct) {
+        existingProduct.quantity += 1;
+      } else {
+        cart.push({ 
+          id: productId, 
+          name: name, 
+          price: price, 
+          image: getProductImage(name),
+          quantity: 1 
+        });
+      }
+      
+      localStorage.setItem('chocomaniaCart', JSON.stringify(cart));
+      
+      // ✅ CAMBIO: Usar notificación visual en lugar de alert
+      showNotification(`✅ ${name} agregado al carrito`);
+      
+      updateCartBadge();
+    }
+
+    // ✅ AGREGAR: Función para mostrar notificación (igual que Catalogo.html)
+    function showNotification(message, type = 'success') {
+      const notification = document.getElementById('cartNotification');
+      const messageElement = document.getElementById('notificationMessage');
+      
+      messageElement.textContent = message;
+      
+      // Cambiar color según tipo
+      if (type === 'error') {
+        notification.style.background = '#dc3545';
+      } else {
+        notification.style.background = '#28a745';
+      }
+      
+      notification.classList.add('show');
+      
+      setTimeout(() => {
+        notification.classList.remove('show');
+        notification.style.background = '#28a745'; // Reset color
+      }, 3000);
+    }
+
+    function updateCartBadge() {
+      const cart = JSON.parse(localStorage.getItem('chocomaniaCart')) || [];
+      const totalItems = cart.reduce((total, item) => total + item.quantity, 0);
+      const badge = document.getElementById('cartBadge');
+      if (badge) badge.textContent = totalItems;
+    }
+
+    // Inicializar
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadProductsFromAPI();
+      updateCartBadge();
+      
+      document.getElementById('applyFilters').addEventListener('click', applyFilters);
+      document.getElementById('clearFilters').addEventListener('click', clearAllFilters);
+      document.getElementById('resetFilters').addEventListener('click', clearAllFilters);
+    });
   </script>
 </body>
 </html>

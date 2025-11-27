@@ -7,6 +7,8 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- ✅ AGREGAR config.js -->
+  <script src="config.js"></script>
   <style>
     body {
       background-color: #f8f9fa;
@@ -148,6 +150,11 @@
       animation: slideIn 0.3s ease-out;
     }
     
+    /* ✅ AGREGAR ESTA CLASE QUE FALTABA */
+    .cart-notification.show {
+      display: block !important;
+    }
+    
     @keyframes slideIn {
       from { transform: translateX(100%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
@@ -247,216 +254,120 @@
   </div>
 
   <script>
-    // MISMO CATÁLOGO ORIGINAL con información de stock agregada
-    const products = [
-      { 
-        id: 1, 
-        name: "Chocolate Avenida", 
-        price: 5000, 
-        category: "con leche", 
-        image: "ChocolateAvenida.png",
-        stock: 10,  // Disponible: 10
-        code: "CA001"
-      },
-      { 
-        id: 2, 
-        name: "Chocolate con Leche", 
-        price: 4000, 
-        category: "con leche", 
-        image: "ChocolateLeche.png",
-        stock: 5,   // Disponible: 5
-        code: "CL002"
-      },
-      { 
-        id: 3, 
-        name: "Chocolate Blanco", 
-        price: 6000, 
-        category: "blanco", 
-        image: "ChocolateBlanco.png",
-        stock: 0,   // Agotado
-        code: "CB003"
-      },
-      { 
-        id: 4, 
-        name: "Chocolate con Almendras", 
-        price: 7000, 
-        category: "con leche", 
-        image: "ChocolateAlmendras.png",
-        stock: 3,   // Stock bajo
-        code: "CA004"
-      },
-      { 
-        id: 5, 
-        name: "Bombones Chocolate Negro", 
-        price: 8000, 
-        category: "Bombones", 
-        image: "Bombones.png",
-        stock: 15,  // Disponible
-        code: "BN005"
-      },
-      { 
-        id: 6, 
-        name: "Bombones Chocolate Blanco", 
-        price: 5000, 
-        category: "Bombones", 
-        image: "BombonesBlanco.png",
-        stock: 0,   // Agotado
-        code: "BB006"
-      },
-      { 
-        id: 7, 
-        name: "Alfajores", 
-        price: 5500, 
-        category: "Alfajores", 
-        image: "Alfajores.png",
-        stock: 8,   // Disponible
-        code: "AL007"
-      },
-      { 
-        id: 8, 
-        name: "Macaroons", 
-        price: 7500, 
-        category: "Macaroons", 
-        image: "Macaroons.png",
-        stock: 2,   // Stock bajo
-        code: "MC008"
-      },
-    ];
+    // Variables globales
+    let allProducts = [];
+    let filteredProducts = [];
 
-    // Variables para filtros
-    let filteredProducts = [...products];
-
-    // Función para obtener el carrito desde localStorage
-    function getCart() {
-      const cart = localStorage.getItem('chocomaniaCart');
-      return cart ? JSON.parse(cart) : [];
+    // ✅ FUNCIÓN PARA OBTENER IMAGEN ESPECÍFICA POR NOMBRE DE PRODUCTO
+    function getProductImage(nombre) {
+      const nombreLower = nombre.toLowerCase();
+      
+      // Mapeo exacto nombre → imagen
+      if (nombreLower.includes('chocolate avenida')) return 'ChocolateAvenida.png';
+      if (nombreLower.includes('chocolate con leche')) return 'ChocolateLeche.png';
+      if (nombreLower.includes('chocolate blanco') && !nombreLower.includes('bombones')) return 'ChocolateBlanco.png';
+      if (nombreLower.includes('chocolate con almendras')) return 'ChocolateAlmendras.png';
+      if (nombreLower.includes('bombones chocolate negro')) return 'Bombones.png';
+      if (nombreLower.includes('bombones chocolate blanco')) return 'BombonesBlanco.png';
+      if (nombreLower.includes('alfajor')) return 'Alfajores.png';
+      if (nombreLower.includes('macaroon')) return 'Macaroons.png';
+      
+      // Por defecto
+      return 'ChocolateLeche.png';
     }
 
-    // Función para actualizar el badge del carrito
-    function updateCartBadge() {
-      const cart = getCart();
-      const totalItems = cart.reduce((total, item) => total + item.quantity, 0);
-      document.getElementById('cartBadge').textContent = totalItems;
-    }
-
-    // Función para mostrar notificación
-    function showNotification(message) {
-      const notification = document.getElementById('cartNotification');
-      const messageElement = document.getElementById('notificationMessage');
-      
-      messageElement.textContent = message;
-      notification.style.display = 'block';
-      
-      setTimeout(() => {
-        notification.style.display = 'none';
-      }, 3000);
-    }
-
-    // Función para agregar producto al carrito
-    function addToCart(productId) {
-      const cart = getCart();
-      const product = products.find(p => p.id === productId);
-      
-      if (!product) return;
-      
-      // Verificar stock disponible
-      if (product.stock === 0) {
-        showNotification(`${product.name} está agotado`);
-        return;
-      }
-      
-      // Verificar si el producto ya está en el carrito
-      const existingItem = cart.find(item => item.id === productId);
-      
-      if (existingItem) {
-        // Verificar que no exceda el stock disponible
-        if (existingItem.quantity < product.stock) {
-          existingItem.quantity += 1;
+    // ✅ CARGAR PRODUCTOS Y SINCRONIZAR CON CARRITO LOCAL
+    async function loadProductsWithStock() {
+      try {
+        console.log("📦 Cargando productos desde /productos/...");
+        
+        const response = await fetch(`${API_URL}/productos/`);
+        
+        if (response.ok) {
+          allProducts = await response.json();
+          console.log("✅ Productos desde API:", allProducts);
+          
+          // ✅ SINCRONIZAR STOCK CON CARRITO LOCAL
+          const cart = JSON.parse(localStorage.getItem('chocomaniaCart')) || [];
+          console.log("🛒 Carrito actual:", cart);
+          
+          // Restar del stock lo que está en el carrito
+          allProducts.forEach(product => {
+            const itemEnCarrito = cart.find(item => item.id == product.id);
+            if (itemEnCarrito) {
+              product.stock -= itemEnCarrito.quantity;
+              console.log(`📉 ${product.nombre}: Stock ajustado de ${product.stock + itemEnCarrito.quantity} a ${product.stock}`);
+            }
+          });
+          
+          filteredProducts = [...allProducts];
+          renderProducts();
         } else {
-          showNotification(`No hay suficiente stock de ${product.name}`);
-          return;
+          console.error("Error:", response.status);
+          document.getElementById('emptyCatalog').style.display = 'block';
         }
-      } else {
-        cart.push({
-          id: product.id,
-          name: product.name,
-          price: product.price,
-          image: product.image,
-          quantity: 1
-        });
+      } catch (error) {
+        console.error("Error:", error);
+        document.getElementById('emptyCatalog').style.display = 'block';
       }
-      
-      // Guardar en localStorage
-      localStorage.setItem('chocomaniaCart', JSON.stringify(cart));
-      
-      // Actualizar badge
-      updateCartBadge();
-      
-      // Mostrar notificación
-      showNotification(`${product.name} agregado al carrito`);
     }
 
-    // Función para formatear precio en CLP
-    function formatPrice(price) {
-      return new Intl.NumberFormat('es-CL', {
-        style: 'currency',
-        currency: 'CLP',
-        minimumFractionDigits: 0
-      }).format(price);
-    }
-
-    // Función para determinar el estado del stock
+    // Determinar estado del stock
     function getStockStatus(stock) {
       if (stock === 0) {
         return { text: "Agotado", class: "stock-out", badge: "danger" };
       } else if (stock < 5) {
         return { text: `Solo ${stock} disponibles`, class: "stock-low", badge: "warning" };
       } else {
-        return { text: `Disponible: ${stock}`, class: "stock-available", badge: "success" };
+        return { text: `Stock: ${stock}`, class: "stock-available", badge: "success" };
       }
     }
 
-    // Función para renderizar productos
+    // ✅ RENDERIZAR PRODUCTOS CON STOCK
     function renderProducts() {
       const container = document.getElementById('productsContainer');
+      const catalog = document.getElementById('productsCatalog');
+      const empty = document.getElementById('emptyCatalog');
+      
       container.innerHTML = '';
       
       if (filteredProducts.length === 0) {
-        document.getElementById('productsCatalog').style.display = 'none';
-        document.getElementById('emptyCatalog').style.display = 'block';
+        catalog.style.display = 'none';
+        empty.style.display = 'block';
         return;
       }
       
-      document.getElementById('productsCatalog').style.display = 'block';
-      document.getElementById('emptyCatalog').style.display = 'none';
+      catalog.style.display = 'block';
+      empty.style.display = 'none';
       
-      // Crear tarjetas de productos
       filteredProducts.forEach(product => {
         const stockStatus = getStockStatus(product.stock);
         const col = document.createElement('div');
         col.className = 'col-md-4 col-sm-6 mb-4';
         
+        const isDisabled = product.stock === 0;
+        const imagenProducto = getProductImage(product.nombre); // ✅ Usar nombre, no tipo
+        
         col.innerHTML = `
           <div class="card product-card">
             <div class="product-image-container">
               <span class="stock-badge badge bg-${stockStatus.badge}">${stockStatus.text}</span>
-              ${product.image ? 
-                `<img class="product-image" src="${product.image}" alt="${product.name}">` : 
-                `<div class="image-placeholder"><i class="fas fa-cube"></i></div>`
-              }
+              <img class="product-image" src="${imagenProducto}" alt="${product.nombre}">
             </div>
             <div class="card-body">
-              <h5 class="product-title">${product.name}</h5>
-              <div class="product-category">${product.category} - Código: ${product.code}</div>
-              <div class="product-price">${formatPrice(product.price)}</div>
+              <h5 class="product-title">${product.nombre}</h5>
+              <div class="product-category">${product.tipo} - ID: ${product.id}</div>
+              <div class="product-price">$${product.precio.toLocaleString('es-CL')}</div>
               <div class="stock-info ${stockStatus.class}">
                 <i class="fas fa-${product.stock > 0 ? 'check-circle' : 'times-circle'}"></i> ${stockStatus.text}
               </div>
-              <button class="btn btn-choco mt-2 w-100 add-to-cart-btn" 
-                      data-product-id="${product.id}"
-                      ${product.stock === 0 ? 'disabled' : ''}>
+              <button 
+                class="btn btn-choco mt-2 w-100" 
+                onclick="addToCart(${product.id}, '${product.nombre}', ${product.precio}, ${product.stock})"
+                ${isDisabled ? 'disabled' : ''}
+              >
                 <i class="fas fa-shopping-cart"></i> 
-                ${product.stock === 0 ? 'Agotado' : 'Agregar al carrito'}
+                ${isDisabled ? 'Agotado' : 'Agregar al carrito'}
               </button>
             </div>
           </div>
@@ -464,26 +375,82 @@
         
         container.appendChild(col);
       });
-      
-      // Agregar event listeners a los botones de carrito
-      document.querySelectorAll('.add-to-cart-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-          const productId = parseInt(this.getAttribute('data-product-id'));
-          addToCart(productId);
-        });
-      });
     }
 
-    // Función para filtrar productos
+    // ✅ AGREGAR AL CARRITO Y REDUCIR STOCK
+    async function addToCart(productId, nombre, precio, stock) {
+      if (stock === 0) {
+        showNotification(`❌ ${nombre} está agotado`, 'error');
+        return;
+      }
+      
+      const cart = JSON.parse(localStorage.getItem('chocomaniaCart')) || [];
+      const existingProduct = cart.find(item => item.id == productId);
+      
+      if (existingProduct) {
+        if (existingProduct.quantity < stock) {
+          existingProduct.quantity += 1;
+        } else {
+          showNotification(`❌ No hay suficiente stock de ${nombre}`, 'error');
+          return;
+        }
+      } else {
+        cart.push({
+          id: productId,
+          name: nombre,
+          price: precio,
+          image: getProductImage(nombre),
+          quantity: 1
+        });
+      }
+      
+      localStorage.setItem('chocomaniaCart', JSON.stringify(cart));
+      
+      // ✅ CAMBIO: Usar notificación visual en lugar de alert
+      showNotification(`✅ ${nombre} agregado al carrito`);
+      
+      // ✅ REDUCIR STOCK EN LA VISTA LOCAL
+      const productoEnLista = allProducts.find(p => p.id === productId);
+      if (productoEnLista) {
+        productoEnLista.stock -= 1;
+        console.log(`📉 Stock de "${nombre}" reducido a: ${productoEnLista.stock}`);
+      }
+      
+      updateCartBadge();
+      filterProducts();
+    }
+
+    // ✅ AGREGAR: Función para mostrar notificación (igual que Catalogo.html)
+    function showNotification(message, type = 'success') {
+      const notification = document.getElementById('cartNotification');
+      const messageElement = document.getElementById('notificationMessage');
+      
+      messageElement.textContent = message;
+      
+      // Cambiar color según tipo
+      if (type === 'error') {
+        notification.style.background = '#dc3545';
+      } else {
+        notification.style.background = '#28a745';
+      }
+      
+      notification.classList.add('show');
+      
+      setTimeout(() => {
+        notification.classList.remove('show');
+        notification.style.background = '#28a745'; // Reset color
+      }, 3000);
+    }
+
+    // Filtrar productos
     function filterProducts() {
       const searchTerm = document.getElementById('searchInput').value.toLowerCase();
       const categoryFilter = document.getElementById('categoryFilter').value;
       const stockFilter = document.getElementById('stockFilter').value;
       
-      filteredProducts = products.filter(product => {
-        const matchesSearch = product.name.toLowerCase().includes(searchTerm) || 
-                             product.code.toLowerCase().includes(searchTerm);
-        const matchesCategory = !categoryFilter || product.category === categoryFilter;
+      filteredProducts = allProducts.filter(product => {
+        const matchesSearch = product.nombre.toLowerCase().includes(searchTerm);
+        const matchesCategory = !categoryFilter || product.tipo.toLowerCase().includes(categoryFilter.toLowerCase());
         
         let matchesStock = true;
         if (stockFilter === "available") {
@@ -500,35 +467,23 @@
       renderProducts();
     }
 
-    // Simulación de actualización de stock en tiempo real
-    function simulateStockUpdate() {
-      // Cada 10 segundos, actualizamos aleatoriamente el stock de algunos productos
-      setInterval(() => {
-        const randomProductIndex = Math.floor(Math.random() * products.length);
-        const changeType = Math.random() > 0.5 ? 1 : -1;
-        const changeAmount = Math.floor(Math.random() * 3) + 1;
-        
-        const newStock = products[randomProductIndex].stock + (changeType * changeAmount);
-        products[randomProductIndex].stock = Math.max(0, newStock);
-        
-        // Si hay filtros aplicados, actualizamos la vista
-        filterProducts();
-        
-        console.log(`Stock actualizado: ${products[randomProductIndex].name} - Nuevo stock: ${products[randomProductIndex].stock}`);
-      }, 10000);
+    // Actualizar badge del carrito
+    function updateCartBadge() {
+      const cart = JSON.parse(localStorage.getItem('chocomaniaCart')) || [];
+      const totalItems = cart.reduce((total, item) => total + item.quantity, 0);
+      const badge = document.getElementById('cartBadge');
+      if (badge) badge.textContent = totalItems;
     }
 
-    // Inicializar eventos
-    document.getElementById('searchInput').addEventListener('input', filterProducts);
-    document.getElementById('categoryFilter').addEventListener('change', filterProducts);
-    document.getElementById('stockFilter').addEventListener('change', filterProducts);
-
-    // Inicializar catálogo y carrito
-    updateCartBadge();
-    renderProducts();
-    
-    // Iniciar simulación de actualización de stock
-    simulateStockUpdate();
+    // Inicializar
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadProductsWithStock();
+      updateCartBadge();
+      
+      document.getElementById('searchInput').addEventListener('input', filterProducts);
+      document.getElementById('categoryFilter').addEventListener('change', filterProducts);
+      document.getElementById('stockFilter').addEventListener('change', filterProducts);
+    });
   </script>
 </body>
 </html>

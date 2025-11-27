@@ -157,6 +157,58 @@
       from { transform: translateX(100%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
     }
+
+    /* ✅ AGREGAR ESTILOS PARA NAVEGACIÓN */
+    .catalog-navigation {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 20px;
+        margin: 30px 0;
+    }
+    
+    .nav-arrow {
+        background: linear-gradient(135deg, #7B3F00, #A0522D);
+        color: white;
+        border: none;
+        border-radius: 8px; /* ✅ CAMBIO: De 50% a 8px para botones rectangulares */
+        width: auto; /* ✅ CAMBIO: Ancho automático */
+        min-width: 120px; /* ✅ NUEVO: Ancho mínimo */
+        height: auto; /* ✅ CAMBIO: Alto automático */
+        padding: 12px 24px; /* ✅ NUEVO: Padding horizontal y vertical */
+        font-size: 1rem;
+        font-weight: 600; /* ✅ NUEVO: Texto más grueso */
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    }
+    
+    .nav-arrow:hover {
+        background: linear-gradient(135deg, #A0522D, #FFB300);
+        transform: translateY(-3px);
+        box-shadow: 0 6px 15px rgba(0,0,0,0.3);
+    }
+    
+    .nav-arrow:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+        opacity: 0.5;
+        transform: none; /* ✅ NUEVO: No elevar cuando está deshabilitado */
+    }
+    
+    .page-indicator {
+        background: white;
+        padding: 12px 24px; /* ✅ CAMBIO: Aumentar padding */
+        border-radius: 8px; /* ✅ CAMBIO: De 25px a 8px */
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        font-weight: bold;
+        color: #7B3F00;
+        min-width: 150px; /* ✅ NUEVO: Ancho mínimo */
+        text-align: center; /* ✅ NUEVO: Centrar texto */
+    }
   </style>
 </head>
 <body>
@@ -214,22 +266,22 @@
       </div>
     </div>
     
-    <!-- Catálogo de productos -->
-    <div id="productsCatalog">
-      <div class="row" id="productsContainer">
-        <!-- Los productos se cargarán aquí dinámicamente -->
-      </div>
-      
-      <!-- Paginación -->
-      <div class="row pagination-container">
-        <div class="col-12 d-flex justify-content-center">
-          <nav>
-            <ul class="pagination" id="pagination">
-              <!-- La paginación se generará dinámicamente -->
-            </ul>
-          </nav>
+    <!-- Contenedor de productos -->
+    <div class="row" id="productsGrid">
+        <!-- Los productos se cargarán aquí -->
+    </div>
+
+    <!-- ✅ NAVEGACIÓN DEBAJO DEL GRID CON TEXTO -->
+    <div class="catalog-navigation">
+        <button class="nav-arrow" id="prevBtn" onclick="cambiarPagina(-1)">
+            Anterior
+        </button>
+        <div class="page-indicator">
+            <span id="pageInfo">Página 1 de 2</span>
         </div>
-      </div>
+        <button class="nav-arrow" id="nextBtn" onclick="cambiarPagina(1)">
+            Siguiente
+        </button>
     </div>
     
     <!-- Mensaje cuando no hay productos -->
@@ -346,7 +398,7 @@
       }
 
       function renderProducts() {
-          const container = document.getElementById('productsContainer');
+          const container = document.getElementById('productsGrid');
           container.innerHTML = '';
           const start = (currentPage - 1) * productsPerPage;
           const show = filteredProducts.slice(start, start + productsPerPage);
@@ -400,8 +452,174 @@
           renderProducts();
       });
 
-      // INICIAR
-      loadProducts();
+      // ✅ VARIABLES GLOBALES PARA PAGINACIÓN
+      let todosLosProductos = [];
+      let paginaActual = 1;
+      const productosPorPagina = 6;
+
+      // ✅ CARGAR PRODUCTOS DESDE LA API
+      async function cargarProductos() {
+          try {
+              console.log("🔍 Cargando productos desde /productos/...");
+              
+              const response = await fetch(`${API_URL}/productos/`);
+              
+              if (response.ok) {
+                  todosLosProductos = await response.json();
+                  console.log(`✅ ${todosLosProductos.length} productos cargados`);
+                  
+                  mostrarPaginaActual();
+              } else {
+                  console.error("Error:", response.status);
+                  document.getElementById('productsGrid').innerHTML = `
+                      <div class="col-12 text-center py-5">
+                          <i class="fas fa-exclamation-triangle fa-3x text-muted mb-3"></i>
+                          <h4>Error al cargar productos</h4>
+                      </div>
+                  `;
+              }
+          } catch (error) {
+              console.error("Error de conexión:", error);
+              document.getElementById('productsGrid').innerHTML = `
+                  <div class="col-12 text-center py-5">
+                      <i class="fas fa-wifi fa-3x text-muted mb-3"></i>
+                      <h4>Error de conexión</h4>
+                      <p>No se pudo conectar con el servidor</p>
+                  </div>
+              `;
+          }
+      }
+
+      // ✅ FUNCIÓN PARA OBTENER IMAGEN
+      function getProductImage(nombre) {
+          const nombreLower = nombre.toLowerCase();
+          
+          if (nombreLower.includes('chocolate avenida')) return 'ChocolateAvenida.png';
+          if (nombreLower.includes('chocolate con leche')) return 'ChocolateLeche.png';
+          if (nombreLower.includes('chocolate blanco') && !nombreLower.includes('bombones')) return 'ChocolateBlanco.png';
+          if (nombreLower.includes('chocolate con almendras')) return 'ChocolateAlmendras.png';
+          if (nombreLower.includes('bombones chocolate negro')) return 'Bombones.png';
+          if (nombreLower.includes('bombones chocolate blanco')) return 'BombonesBlanco.png';
+          if (nombreLower.includes('alfajor')) return 'Alfajores.png';
+          if (nombreLower.includes('macaroon')) return 'Macaroons.png';
+          
+          return 'ChocolateLeche.png';
+      }
+
+      // ✅ MOSTRAR PRODUCTOS DE LA PÁGINA ACTUAL
+      function mostrarPaginaActual() {
+          const inicio = (paginaActual - 1) * productosPorPagina;
+          const fin = inicio + productosPorPagina;
+          const productosAMostrar = todosLosProductos.slice(inicio, fin);
+          
+          const grid = document.getElementById('productsGrid');
+          grid.innerHTML = '';
+          
+          productosAMostrar.forEach(producto => {
+              const imagenProducto = getProductImage(producto.nombre);
+              
+              const col = document.createElement('div');
+              col.className = 'col-md-4 col-sm-6 mb-4';
+              col.innerHTML = `
+                  <div class="card product-card">
+                      <div class="product-image-container">
+                          <img class="product-image" src="${imagenProducto}" alt="${producto.nombre}">
+                      </div>
+                      <div class="card-body">
+                          <h5 class="product-title">${producto.nombre}</h5>
+                          <div class="product-category">${producto.tipo}</div>
+                          <div class="product-price">$${producto.precio.toLocaleString('es-CL')}</div>
+                          <p class="text-muted">${producto.descripcion || 'Delicioso chocolate artesanal'}</p>
+                          <button class="btn btn-choco mt-2 w-100" onclick="addToCart(${producto.id}, '${producto.nombre}', ${producto.precio})">
+                              <i class="fas fa-shopping-cart"></i> Agregar al carrito
+                          </button>
+                      </div>
+                  </div>
+              `;
+              grid.appendChild(col);
+          });
+          
+          // Actualizar indicador de página
+          const totalPaginas = Math.ceil(todosLosProductos.length / productosPorPagina);
+          document.getElementById('pageInfo').textContent = `Página ${paginaActual} de ${totalPaginas}`;
+          
+          // Habilitar/deshabilitar botones
+          document.getElementById('prevBtn').disabled = paginaActual === 1;
+          document.getElementById('nextBtn').disabled = paginaActual === totalPaginas;
+      }
+
+      // ✅ CAMBIAR DE PÁGINA
+      function cambiarPagina(direccion) {
+          const totalPaginas = Math.ceil(todosLosProductos.length / productosPorPagina);
+          
+          paginaActual += direccion;
+          
+          // Validar límites
+          if (paginaActual < 1) paginaActual = 1;
+          if (paginaActual > totalPaginas) paginaActual = totalPaginas;
+          
+          mostrarPaginaActual();
+          
+          // Scroll suave hacia arriba
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      // ✅ AGREGAR AL CARRITO
+      function addToCart(productId, name, price) {
+        const cart = JSON.parse(localStorage.getItem('chocomaniaCart')) || [];
+        const existingProduct = cart.find(item => item.id == productId);
+        
+        if (existingProduct) {
+            existingProduct.quantity += 1;
+        } else {
+            cart.push({ 
+                id: productId, 
+                name: name, 
+                price: price, 
+                image: getProductImage(name),
+                quantity: 1 
+            });
+        }
+        
+        localStorage.setItem('chocomaniaCart', JSON.stringify(cart));
+        showNotification(`✅ ${name} agregado al carrito`);
+        updateCartBadge();
+    }
+
+    // ✅ NOTIFICACIÓN
+    function showNotification(message, type = 'success') {
+        const notification = document.getElementById('cartNotification');
+        const messageElement = document.getElementById('notificationMessage');
+        
+        messageElement.textContent = message;
+        
+        if (type === 'error') {
+            notification.style.background = '#dc3545';
+        } else {
+            notification.style.background = '#28a745';
+        }
+        
+        notification.classList.add('show');
+        
+        setTimeout(() => {
+            notification.classList.remove('show');
+            notification.style.background = '#28a745';
+        }, 3000);
+    }
+
+    // ✅ ACTUALIZAR BADGE DEL CARRITO
+    function updateCartBadge() {
+        const cart = JSON.parse(localStorage.getItem('chocomaniaCart')) || [];
+        const totalItems = cart.reduce((total, item) => total + item.quantity, 0);
+        const badge = document.getElementById('cartBadge');
+        if (badge) badge.textContent = totalItems;
+    }
+
+    // ✅ INICIALIZAR AL CARGAR LA PÁGINA
+    document.addEventListener('DOMContentLoaded', async () => {
+        await cargarProductos();
+        updateCartBadge();
+    });
   </script>
 </body>
 </html>
