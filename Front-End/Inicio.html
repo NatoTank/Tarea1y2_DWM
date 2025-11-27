@@ -70,7 +70,7 @@
           const data = await response.json();
           localStorage.setItem('token', data.access_token); // ¡AQUÍ SE GUARDA LA LLAVE MAESTRA!
           alert('Bienvenido a Chocomanía');
-          window.location.href = 'Catalogo.html'; // Te manda al catálogo al entrar
+          window.location.href = 'Home.html'; // Te manda al catálogo al entrar
         } else {
           alert('Credenciales incorrectas');
         }
