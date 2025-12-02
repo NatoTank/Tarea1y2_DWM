@@ -1725,38 +1725,46 @@ def reportar_problema_entrega(
 
 # Después de @app.put("/seguimiento/{pedido_id}/reportar-problema"), agregar:
 
-@app.patch("/pedidos/{pedido_id}", response_model=dict)
-def actualizar_pedido_parcial(
+@app.get("/seguimiento/{pedido_id}", response_model=dict)
+def obtener_seguimiento_pedido(
     pedido_id: int,
-    motivo_cancelacion: str = None,
     current_user: UsuarioDB = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Actualiza parcialmente un pedido (principalmente para cancelaciones con motivo).
+    Obtiene la información de seguimiento de un pedido específico.
     """
     pedido = get_pedido_by_id(db, pedido_id)
     if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     
-    # Verificar permisos
-    if pedido.usuario_id != current_user.id and current_user.rol != Roles.administrador:
-        raise HTTPException(status_code=403, detail="No tienes permiso para modificar este pedido")
+    # Verificar permisos: solo el dueño del pedido, el repartidor asignado o admin
+    seguimiento = get_seguimiento_by_pedido_id(db, pedido_id)
     
-    # Solo permitir cancelación si el pedido no está despachado
-    if pedido.estado in [EstadoPedido.despachado, EstadoPedido.entregado]:
-        raise HTTPException(status_code=400, detail="No se puede cancelar un pedido ya despachado o entregado")
+    if current_user.rol == Roles.cliente:
+        if pedido.usuario_id != current_user.id:
+            raise HTTPException(status_code=403, detail="No tienes permiso para ver este seguimiento")
     
-    # Cancelar pedido
-    pedido.estado = EstadoPedido.cancelado
-    db.commit()
-    db.refresh(pedido)
+    if not seguimiento:
+        raise HTTPException(status_code=404, detail="No hay seguimiento disponible para este pedido")
     
-    print(f"❌ Pedido {pedido_id} cancelado. Motivo: {motivo_cancelacion or 'No especificado'}")
+    # Obtener cliente
+    cliente = get_usuario_by_id(db, pedido.usuario_id)
     
     return {
-        "mensaje": "Pedido cancelado exitosamente",
-        "pedido_id": pedido_id,
-        "estado": pedido.estado.value,
-        "motivo": motivo_cancelacion
+        "pedido_id": pedido.id,
+        "estado": seguimiento.estado.value,
+        "hora_estimada_llegada": seguimiento.hora_estimada_llegada,
+        "repartidor_asignado": seguimiento.repartidor_asignado,
+        "ubicacion": {
+            "lat": seguimiento.lat,
+            "lng": seguimiento.lng
+        } if seguimiento.lat and seguimiento.lng else None,
+        "cliente": {
+            "nombre": cliente.nombre if cliente.nombre else "Cliente",
+            "direccion": cliente.direccion,
+            "telefono": cliente.telefono
+        },
+        "estado_pedido": pedido.estado.value,
+        "total": pedido.total
     }

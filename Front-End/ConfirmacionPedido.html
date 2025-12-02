@@ -106,7 +106,40 @@
     <script>
         let isConfirming = false;
 
+        // ✅ AGREGAR: Función para cargar datos del usuario
+        async function loadUserData() {
+            const token = localStorage.getItem('token');
+            
+            if (!token) {
+                document.getElementById('customerName').textContent = 'Usuario Invitado';
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/usuarios/me`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    const displayName = user.nombre || user.email.split('@')[0];
+                    document.getElementById('customerName').textContent = displayName;
+                } else {
+                    document.getElementById('customerName').textContent = 'Usuario';
+                }
+            } catch (error) {
+                console.error('Error cargando datos del usuario:', error);
+                document.getElementById('customerName').textContent = 'Usuario';
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
+            // ✅ AGREGAR: Cargar datos del usuario
+            loadUserData();
+            
             const pendingOrder = JSON.parse(localStorage.getItem('pendingOrder'));
             if (!pendingOrder || !pendingOrder.items || pendingOrder.items.length === 0) {
                 alert("No hay pedido pendiente");
