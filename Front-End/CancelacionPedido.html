@@ -397,6 +397,9 @@
                                 <button class="btn btn-primary-small track-btn" onclick="irAlSeguimiento(${order.id})">
                                     <i class="fas fa-map-marker-alt me-1"></i>Seguir Pedido
                                 </button>
+                                <button class="btn btn-outline-choco" onclick="verNotificaciones(${order.id})" style="padding: 6px 15px; font-size: 0.8rem; margin-left: 5px;">
+                                    <i class="fas fa-bell me-1"></i>Ver Notificaciones
+                                </button>
                             `;
                         } else if (estado === 'entregado') {
                             badgeClass = 'status-delivered';
@@ -468,10 +471,16 @@
                     </button>`;
         }
 
+        // ✅ MODIFICAR: Función para botones de seguimiento
         function getTrackBtn(id) {
-            return `<button class="btn btn-primary-small track-btn" onclick="irAlSeguimiento('${id}')">
-                        <i class="fas fa-map-marker-alt me-1"></i>Seguir
-                    </button>`;
+            return `
+                <button class="btn btn-primary-small track-btn" onclick="irAlSeguimiento(${id})">
+                    <i class="fas fa-map-marker-alt me-1"></i>Seguir Pedido
+                </button>
+                <button class="btn btn-outline-choco" onclick="verNotificaciones(${id})" style="padding: 6px 15px; font-size: 0.8rem; margin-left: 5px;">
+                    <i class="fas fa-bell me-1"></i>Ver Notificaciones
+                </button>
+            `;
         }
 
         // 3. LÓGICA DE BOTONES
@@ -492,6 +501,12 @@
             window.location.href = 'InformacionLlegada.html';
         };
 
+        // ✅ AGREGAR: Función para ver notificaciones
+        window.verNotificaciones = function(id) {
+            localStorage.setItem('current_tracking_order', id);
+            window.location.href = 'InformacionLlegada.html';
+        };
+
         // 4. CONFIRMAR CANCELACIÓN
         document.getElementById('confirmCancelBtn').addEventListener('click', async function() {
             const reason = document.getElementById('cancelReason').value;
@@ -506,34 +521,15 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
 
             try {
-                // Intentar con PATCH primero
-                let response = await fetch(`${API_URL}/pedidos/${currentOrderToCancel}`, {
-                    method: 'PATCH',
-                    headers: getAuthHeaders(),
-                    body: JSON.stringify({
-                        estado: 'cancelado',
-                        motivo_cancelacion: reason,
-                        explicacion: document.getElementById('cancelExplanation').value
-                    })
+                // ✅ USAR EL ENDPOINT CORRECTO: /pedidos/{pedido_id}/cancelar
+                const response = await fetch(`${API_URL}/pedidos/${currentOrderToCancel}/cancelar`, {
+                    method: 'PUT',
+                    headers: getAuthHeaders()
                 });
-
-                // Si PATCH no funciona, intentar con PUT
-                if (response.status === 405) {
-                    console.log("PATCH no soportado, intentando con PUT");
-                    response = await fetch(`${API_URL}/pedidos/${currentOrderToCancel}`, {
-                        method: 'PUT',
-                        headers: getAuthHeaders(),
-                        body: JSON.stringify({
-                            estado: 'cancelado',
-                            motivo_cancelacion: reason,
-                            explicacion: document.getElementById('cancelExplanation').value
-                        })
-                    });
-                }
 
                 if (response.ok) {
                     const result = await response.json();
-                    console.log("Respuesta del servidor:", result);
+                    console.log("✅ Respuesta del servidor:", result);
                     
                     alert("Pedido cancelado exitosamente.");
                     modalCancel.hide();

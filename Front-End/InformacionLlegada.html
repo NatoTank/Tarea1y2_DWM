@@ -272,48 +272,8 @@
                         <h5 class="mb-0"><i class="fas fa-history me-2"></i>Progreso del Pedido</h5>
                     </div>
                     <div class="card-body">
-                        <div class="timeline">
-                            <div class="timeline-item active">
-                                <div class="timeline-dot"></div>
-                                <div class="d-flex align-items-start mb-2">
-                                    <div class="notification-icon icon-dispatched">
-                                        <i class="fas fa-shipping-fast"></i>
-                                    </div>
-                                    <div>
-                                        <div class="subject-line">Pedido Despachado</div>
-                                        <div class="text-muted small">15:30 - Tu pedido ha sido enviado</div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="timeline-item active">
-                                <div class="timeline-dot"></div>
-                                <div class="d-flex align-items-start mb-2">
-                                    <div class="notification-icon icon-transit">
-                                        <i class="fas fa-truck"></i>
-                                    </div>
-                                    <div>
-                                        <div class="subject-line">Pedido en Camino</div>
-                                        <div class="text-muted small">15:30 - Tu pedido está en reparto</div>
-                                        <div class="time-estimate">Llegada estimada: <span id="timelineEstimate">15:50</span></div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Estado actual dinámico -->
-                            <div class="timeline-item active" id="currentStatus">
-                                <div class="timeline-dot"></div>
-                                <div class="d-flex align-items-start">
-                                    <div class="notification-icon icon-transit">
-                                        <i class="fas fa-truck"></i>
-                                    </div>
-                                    <div>
-                                        <div class="subject-line">En Reparto</div>
-                                        <div class="text-muted small">Estado actual del pedido</div>
-                                        <div class="time-estimate">Llegada estimada: <span id="currentEstimate">15:50</span></div>
-                                    </div>
-                                </div>
-                            </div>
+                        <div class="timeline" id="timelineContainer">
+                            <!-- ✅ El timeline se generará dinámicamente desde JavaScript -->
                         </div>
                     </div>
                 </div>
@@ -336,52 +296,16 @@
                                 <div class="row mb-3">
                                     <div class="col-12">
                                         <p class="mb-1"><strong>De:</strong> Chocomania</p>
-                                        <p class="mb-1"><strong>Hora:</strong> 15:30</p>
+                                        <p class="mb-1"><strong>Hora:</strong> <span id="notificationTime">15:30</span></p>
                                     </div>
                                 </div>
                                 <div class="row">
                                     <div class="col-12">
                                         <div class="subject-line">🍫 Tu pedido Chocomania está en camino</div>
-                                        <p class="mb-2">Llegada estimada: <span class="time-estimate">15:50</span></p>
+                                        <p class="mb-2">Llegada estimada: <span class="time-estimate" id="notificationEstimate">15:50</span></p>
                                         <div class="mt-3 p-3 email-preview">
-                                            <p class="mb-1 small">¡Hola Juan! Tu pedido de Chocomania ya está en camino.</p>
-                                            <p class="mb-0 small">Te llegará aproximadamente a las 15:50. ¡Prepárate para disfrutar!</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Notificación de retraso (ocasional) -->
-                <div class="row mb-4" id="delayNotification">
-                    <div class="col-12">
-                        <div class="card border-warning">
-                            <div class="delay-indicator">
-                                <i class="fas fa-exclamation-triangle me-1"></i>Retraso
-                            </div>
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <span class="fw-bold">Actualización Importante</span>
-                                <span class="status-badge status-delayed">Retraso</span>
-                            </div>
-                            <div class="card-body">
-                                <div class="row mb-3">
-                                    <div class="col-12">
-                                        <p class="mb-1"><strong>De:</strong> Chocomania</p>
-                                        <p class="mb-1"><strong>Hora:</strong> 15:35</p>
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="col-12">
-                                        <div class="subject-line">⚠️ Retraso en tu entrega</div>
-                                        <p class="mb-2">
-                                            <span class="time-delayed me-2">Hora anterior: 15:50</span>
-                                            <span class="time-estimate">Nueva hora estimada: 16:20</span>
-                                        </p>
-                                        <div class="mt-3 p-3 email-preview">
-                                            <p class="mb-1 small">Lamentamos el inconveniente, Juan.</p>
-                                            <p class="mb-0 small">Tu pedido ha sufrido un retraso inesperado. Nueva hora estimada: 16:20.</p>
+                                            <p class="mb-1 small" id="notificationMessage">¡Hola! Tu pedido de Chocomania ya está en camino.</p>
+                                            <p class="mb-0 small" id="notificationDetails">Te llegará aproximadamente a las 15:50. ¡Prepárate para disfrutar!</p>
                                         </div>
                                     </div>
                                 </div>
@@ -391,44 +315,216 @@
                 </div>
 
                 <div class="choco-divider"></div>
-
-                <!-- Botón simple para simular retraso -->
-                <div class="row mt-4">
-                    <div class="col-12 text-center">
-                        <button class="btn btn-choco" id="simulateDelay">
-                            <i class="fas fa-clock me-1"></i>Simular retraso inesperado
-                        </button>
-                        <small class="d-block text-muted mt-2">(Esto simula lo que pasaría si ocurriera un retraso real)</small>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="config.js"></script>
     <script>
-        // Cargar datos del pedido actual
-        function loadOrderData() {
-            const currentOrder = localStorage.getItem('current_tracking_order') || '#CM202400001';
-            document.getElementById('orderNumberDisplay').textContent = `Pedido ${currentOrder}`;
+        // ✅ Variables globales
+        let pedidoData = null;
+        let seguimientoData = null;
+
+        // ✅ Cargar datos del pedido desde el backend
+        async function loadOrderData() {
+            const orderId = localStorage.getItem('current_tracking_order');
             
-            // Cargar información del pedido desde localStorage
-            const orders = JSON.parse(localStorage.getItem('chocomania_orders')) || [];
-            const currentOrderData = orders.find(order => order.id === currentOrder);
+            if (!orderId) {
+                alert("No se encontró el pedido a seguir");
+                window.location.href = 'CancelacionPedido.html';
+                return;
+            }
+
+            const token = localStorage.getItem('token');
+            if (!token) {
+                alert("Debes iniciar sesión");
+                window.location.href = 'Inicio.html';
+                return;
+            }
+
+            try {
+                // ✅ Obtener datos del pedido
+                const pedidoResponse = await fetch(`${API_URL}/pedidos/${orderId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!pedidoResponse.ok) {
+                    throw new Error("Pedido no encontrado");
+                }
+
+                pedidoData = await pedidoResponse.json();
+                console.log("📦 Pedido cargado:", pedidoData);
+
+                // ✅ Obtener datos del seguimiento
+                const seguimientoResponse = await fetch(`${API_URL}/seguimiento/${orderId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (seguimientoResponse.ok) {
+                    seguimientoData = await seguimientoResponse.json();
+                    console.log("🚚 Seguimiento cargado:", seguimientoData);
+                } else {
+                    console.warn("⚠️ No hay seguimiento disponible para este pedido");
+                }
+
+                // ✅ Renderizar datos en la página
+                renderOrderInfo();
+
+            } catch (error) {
+                console.error("❌ Error cargando datos:", error);
+                alert("Error al cargar información del pedido: " + error.message);
+                window.location.href = 'CancelacionPedido.html';
+            }
+        }
+
+        // ✅ Formatear hora
+        function formatTime(dateString) {
+            if (!dateString) return "N/A";
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+            } catch (e) {
+                return "N/A";
+            }
+        }
+
+        // ✅ Calcular hora de despacho (restando 3 horas a la hora estimada)
+        function calcularHoraDespacho(horaEstimada) {
+            if (!horaEstimada || horaEstimada === 'Calculando...') {
+                return formatTime(pedidoData.fecha_creacion);
+            }
             
-            if (currentOrderData) {
-                // Si el pedido está entregado, mostrar mensaje de entrega completada
-                if (currentOrderData.status === 'Entregado') {
-                    document.querySelector('.driver-info').innerHTML = `
-                        <div class="text-center">
-                            <i class="fas fa-check-circle fa-3x mb-3" style="color: var(--choco-success);"></i>
-                            <h4>¡Pedido Entregado!</h4>
-                            <p class="mb-0">Tu pedido fue entregado exitosamente</p>
-                            <small><i class="fas fa-clock me-1"></i>Hora de entrega: ${currentOrderData.deliveryTime || '16:54'}</small>
+            try {
+                // Si horaEstimada es "18:30", calcular 3 horas antes = "15:30"
+                const [horas, minutos] = horaEstimada.split(':').map(Number);
+                const horaDespacho = new Date();
+                horaDespacho.setHours(horas - 3, minutos, 0, 0);
+                return horaDespacho.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+            } catch (e) {
+                return formatTime(pedidoData.fecha_creacion);
+            }
+        }
+
+        // ✅ Renderizar información en la página
+        function renderOrderInfo() {
+            // Actualizar número de pedido
+            document.getElementById('orderNumberDisplay').textContent = `Pedido #${pedidoData.id}`;
+
+            // ✅ Obtener nombre del cliente
+            const clienteNombre = seguimientoData?.cliente?.nombre || pedidoData.clientName || "Cliente";
+            const horaCreacion = formatTime(pedidoData.fecha_creacion);
+            document.querySelector('.text-muted').textContent = `Cliente: ${clienteNombre} · ${horaCreacion}`;
+
+            // ✅ ACTUALIZAR NOTIFICACIÓN CON NOMBRE REAL
+            const horaEstimadaLlegada = seguimientoData?.hora_estimada_llegada || "Calculando...";
+            const horaDespacho = calcularHoraDespacho(horaEstimadaLlegada);
+            
+            document.getElementById('notificationTime').textContent = horaDespacho;
+            document.getElementById('notificationEstimate').textContent = horaEstimadaLlegada;
+            document.getElementById('notificationMessage').textContent = `¡Hola ${clienteNombre}! Tu pedido de Chocomania ya está en camino.`;
+            document.getElementById('notificationDetails').textContent = `Te llegará aproximadamente a las ${horaEstimadaLlegada}. ¡Prepárate para disfrutar!`;
+
+            // ✅ Renderizar información del repartidor
+            if (seguimientoData && seguimientoData.repartidor_asignado) {
+                document.querySelector('.driver-info').innerHTML = `
+                    <div class="row align-items-center">
+                        <div class="col-3 text-center">
+                            <i class="fas fa-motorcycle fa-2x" style="color: var(--choco-gold);"></i>
                         </div>
-                    `;
-                    
-                    document.getElementById('currentStatus').innerHTML = `
+                        <div class="col-9">
+                            <h5 class="mb-1">${seguimientoData.repartidor_asignado}</h5>
+                            <p class="mb-0">En camino con tus chocolates</p>
+                            <small><i class="fas fa-clock me-1"></i>Llegada estimada: <span id="estimatedArrival">${horaEstimadaLlegada}</span></small>
+                        </div>
+                    </div>
+                `;
+            } else {
+                document.querySelector('.driver-info').innerHTML = `
+                    <div class="text-center">
+                        <i class="fas fa-box fa-2x mb-2" style="color: var(--choco-gold);"></i>
+                        <h5 class="mb-1">Preparando tu pedido</h5>
+                        <p class="mb-0">Tu pedido está siendo preparado</p>
+                        <small><i class="fas fa-clock me-1"></i>Pronto será asignado a un repartidor</small>
+                    </div>
+                `;
+            }
+
+            // ✅ Renderizar timeline completo
+            renderTimeline();
+        }
+
+        // ✅ Renderizar timeline completo dinámicamente
+        function renderTimeline() {
+            const timelineContainer = document.getElementById('timelineContainer');
+            const estado = (pedidoData.estado || '').toLowerCase();
+            const estadoSeguimiento = seguimientoData?.estado?.toLowerCase() || '';
+            const horaEstimada = seguimientoData?.hora_estimada_llegada || 'Calculando...';
+            const horaDespacho = calcularHoraDespacho(horaEstimada);
+
+            let timelineHTML = '';
+
+            // 1. Pedido Despachado
+            if (seguimientoData) {
+                timelineHTML += `
+                    <div class="timeline-item active">
+                        <div class="timeline-dot"></div>
+                        <div class="d-flex align-items-start mb-2">
+                            <div class="notification-icon icon-dispatched">
+                                <i class="fas fa-shipping-fast"></i>
+                            </div>
+                            <div>
+                                <div class="subject-line">Pedido Despachado</div>
+                                <div class="text-muted small">${horaDespacho} - Tu pedido ha sido enviado</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 2. Pedido en Camino
+            if (estado === 'despachado' || estadoSeguimiento === 'en camino') {
+                timelineHTML += `
+                    <div class="timeline-item active">
+                        <div class="timeline-dot"></div>
+                        <div class="d-flex align-items-start mb-2">
+                            <div class="notification-icon icon-transit">
+                                <i class="fas fa-truck"></i>
+                            </div>
+                            <div>
+                                <div class="subject-line">Pedido en Camino</div>
+                                <div class="text-muted small">${horaDespacho} - Tu pedido está en reparto</div>
+                                <div class="time-estimate">Llegada estimada: ${horaEstimada}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // 3. Estado actual: En Reparto
+                timelineHTML += `
+                    <div class="timeline-item active">
+                        <div class="timeline-dot"></div>
+                        <div class="d-flex align-items-start">
+                            <div class="notification-icon icon-transit">
+                                <i class="fas fa-truck"></i>
+                            </div>
+                            <div>
+                                <div class="subject-line">En Reparto</div>
+                                <div class="text-muted small">Estado actual del pedido</div>
+                                <div class="time-estimate">Llegada estimada: ${horaEstimada}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (estado === 'entregado' || estadoSeguimiento === 'entregado') {
+                timelineHTML += `
+                    <div class="timeline-item active">
                         <div class="timeline-dot"></div>
                         <div class="d-flex align-items-start">
                             <div class="notification-icon" style="background-color: #E8F5E9; color: #2E7D32;">
@@ -437,74 +533,48 @@
                             <div>
                                 <div class="subject-line">Pedido Entregado</div>
                                 <div class="text-muted small">Entregado exitosamente</div>
-                                <div class="time-estimate">Hora de entrega: ${currentOrderData.deliveryTime || '16:54'}</div>
+                                <div class="time-estimate">✅ Pedido completado</div>
                             </div>
                         </div>
-                    `;
-                }
+                    </div>
+                `;
+            } else if (estado === 'pagado') {
+                timelineHTML += `
+                    <div class="timeline-item active">
+                        <div class="timeline-dot"></div>
+                        <div class="d-flex align-items-start">
+                            <div class="notification-icon icon-transit">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div>
+                                <div class="subject-line">Pago Confirmado</div>
+                                <div class="text-muted small">Tu pedido está siendo preparado</div>
+                                <div class="time-estimate">En preparación</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                timelineHTML += `
+                    <div class="timeline-item active">
+                        <div class="timeline-dot"></div>
+                        <div class="d-flex align-items-start">
+                            <div class="notification-icon icon-dispatched">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div>
+                                <div class="subject-line">Procesando</div>
+                                <div class="text-muted small">Tu pedido está siendo procesado</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
             }
+
+            timelineContainer.innerHTML = timelineHTML;
         }
 
-        // Ocultar notificación de retraso inicialmente
-        document.getElementById('delayNotification').style.display = 'none';
-        
-        // Simular retraso ocasional
-        document.getElementById('simulateDelay').addEventListener('click', function() {
-            const delayNotification = document.getElementById('delayNotification');
-            const currentStatus = document.getElementById('currentStatus');
-            
-            if (delayNotification.style.display === 'none') {
-                // Mostrar retraso
-                delayNotification.style.display = 'block';
-                currentStatus.className = 'timeline-item delayed';
-                currentStatus.innerHTML = `
-                    <div class="timeline-dot"></div>
-                    <div class="d-flex align-items-start">
-                        <div class="notification-icon icon-delayed">
-                            <i class="fas fa-exclamation-triangle"></i>
-                        </div>
-                        <div>
-                            <div class="subject-line">Retraso en Entrega</div>
-                            <div class="text-muted small">Actualizado hace 5 minutos</div>
-                            <div class="time-estimate">Nueva llegada estimada: 16:20</div>
-                        </div>
-                    </div>
-                `;
-                
-                // Actualizar todas las estimaciones
-                document.getElementById('estimatedArrival').textContent = '16:20';
-                document.getElementById('timelineEstimate').textContent = '16:20';
-                document.getElementById('currentEstimate').textContent = '16:20';
-                
-                this.innerHTML = '<i class="fas fa-check me-1"></i>Quitar retraso';
-            } else {
-                // Quitar retraso
-                delayNotification.style.display = 'none';
-                currentStatus.className = 'timeline-item active';
-                currentStatus.innerHTML = `
-                    <div class="timeline-dot"></div>
-                    <div class="d-flex align-items-start">
-                        <div class="notification-icon icon-transit">
-                            <i class="fas fa-truck"></i>
-                        </div>
-                        <div>
-                            <div class="subject-line">En Reparto</div>
-                            <div class="text-muted small">Estado actual del pedido</div>
-                            <div class="time-estimate">Llegada estimada: 15:50</div>
-                        </div>
-                    </div>
-                `;
-                
-                // Restaurar estimaciones originales
-                document.getElementById('estimatedArrival').textContent = '15:50';
-                document.getElementById('timelineEstimate').textContent = '15:50';
-                document.getElementById('currentEstimate').textContent = '15:50';
-                
-                this.innerHTML = '<i class="fas fa-clock me-1"></i>Simular retraso inesperado';
-            }
-        });
-
-        // Cargar datos al iniciar
+        // ✅ Inicializar
         document.addEventListener('DOMContentLoaded', function() {
             loadOrderData();
         });

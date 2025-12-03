@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone, date, time
 from enum import Enum
 import io 
 import random
+import pytz  # ✅ Ya está importado
 
 # --- IMPORTS DE INTEGRACIÓN ---
 import os
@@ -49,6 +50,9 @@ conf = ConnectionConfig(
     USE_CREDENTIALS=True,
     VALIDATE_CERTS=True
 )
+
+# ✅ AGREGAR: Definir zona horaria de Chile
+CHILE_TZ = pytz.timezone('America/Santiago')
 
 # --- 1. DEFINICIONES DE ENUMS ---
 class Roles(str, Enum):
@@ -912,37 +916,14 @@ async def confirmar_pago_simulado(token: int, simul_status: str, db: Session = D
         raise HTTPException(status_code=404, detail="Pedido no válido o ya procesado")
 
     if simul_status == "aprobado":
-        # ✅ CAMBIO: Cambiar a "pagado" primero, luego a "en_preparacion"
         pedido.estado = EstadoPedido.pagado
         print(f"Pedido {pedido.id} ahora PAGADO.")
         
-        # Crea el documento por defecto como BOLETA
         nuevo_doc = DocumentoDB(pedido_id=pedido.id, tipo=TipoDocumento.boleta, total=pedido.total)
         db.add(nuevo_doc)
         
-        nuevo_seguimiento = SeguimientoDB(
-            pedido_id=pedido.id,
-            estado=EstadoSeguimiento.en_camino,
-            hora_estimada_llegada= (datetime.now(timezone.utc) + timedelta(hours=1)).time().isoformat()
-        )
-        db.add(nuevo_seguimiento)
-        
-        # --- ¡LÓGICA DE EMAIL AÑADIDA! ---
-        dueño_pedido = get_usuario_by_id(db, pedido.usuario_id)
-        if dueño_pedido:
-            cuerpo_html = f"""
-            <h1>¡Tu pago ha sido aprobado!</h1>
-            <p>Hola {dueño_pedido.nombre or dueño_pedido.email},</p>
-            <p>Tu pago para el pedido <strong>Nº {pedido.id}</strong> por un total de <strong>${pedido.total}</strong> ha sido procesado.</p>
-            <p>Ya estamos preparando tus chocolates.</p>
-            <p>¡Gracias por tu compra!</p>
-            """
-            await enviar_email_async(
-                asunto=f"Confirmación de Pedido Chocomanía Nº {pedido.id}",
-                email_destinatario=dueño_pedido.email,
-                cuerpo_html=cuerpo_html
-            )
-        # --- FIN ---
+        # ✅ CAMBIO: NO crear seguimiento aquí, se crea cuando el repartidor inicia
+        # nuevo_seguimiento = SeguimientoDB(...)  <- ELIMINAR ESTO
         
         db.commit()
         return {
@@ -1007,12 +988,9 @@ async def marcar_pedido_pagado(
     # Crear seguimiento si no existe
     seguimiento_existente = get_seguimiento_by_pedido_id(db, pedido_id)
     if not seguimiento_existente:
-        nuevo_seguimiento = SeguimientoDB(
-            pedido_id=pedido.id,
-            estado=EstadoSeguimiento.en_camino,
-            hora_estimada_llegada=(datetime.now(timezone.utc) + timedelta(hours=1)).time().isoformat()
-        )
-        db.add(nuevo_seguimiento)
+        # ✅ CAMBIO: NO crear seguimiento automáticamente
+        # Se creará cuando el repartidor marque "En Camino"
+        pass
     
     db.commit()
     db.refresh(pedido)
@@ -1151,15 +1129,18 @@ def asignar_repartidor_a_pedido(
     # Buscar o crear seguimiento
     seguimiento = get_seguimiento_by_pedido_id(db, pedido_id)
     if not seguimiento:
+        # ✅ CAMBIO: Crear seguimiento SIN hora estimada aún
+        # La hora se establecerá cuando el repartidor inicie el viaje
         seguimiento = SeguimientoDB(
             pedido_id=pedido.id,
             estado=EstadoSeguimiento.en_camino,
-            hora_estimada_llegada=(datetime.now(timezone.utc) + timedelta(hours=1)).time().isoformat()
+            repartidor_asignado=repartidor.nombre or repartidor.email
+            # ❌ NO poner hora_estimada_llegada aquí
         )
         db.add(seguimiento)
-    
-    # Asignar repartidor
-    seguimiento.repartidor_asignado = repartidor.nombre or repartidor.email
+    else:
+        # Asignar repartidor
+        seguimiento.repartidor_asignado = repartidor.nombre or repartidor.email
     
     # Cambiar estado del pedido a despachado
     pedido.estado = EstadoPedido.despachado
@@ -1240,7 +1221,7 @@ def obtener_pedidos_pendientes_despacho(
 
 # ¡NUEVO ENDPOINT! Marcar pedido como "en camino"
 @app.put("/pedidos/{pedido_id}/en-camino", response_model=dict)
-def marcar_pedido_en_camino(
+async def marcar_pedido_en_camino(  # ✅ CAMBIAR A async
     pedido_id: int,
     current_user: UsuarioDB = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -1248,6 +1229,7 @@ def marcar_pedido_en_camino(
     """
     Marca un pedido como despachado/en camino.
     Solo para repartidores o admin.
+    ✅ AQUÍ se establece la hora de despacho y la hora estimada de llegada (+3 horas)
     """
     if current_user.rol not in [Roles.repartidor, Roles.administrador]:
         raise HTTPException(status_code=403, detail="Solo repartidores o admin pueden marcar pedidos en camino")
@@ -1255,6 +1237,15 @@ def marcar_pedido_en_camino(
     pedido = get_pedido_by_id(db, pedido_id)
     if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    # ✅ Hora de Chile
+    hora_despacho = datetime.now(CHILE_TZ)
+    
+    # ✅ Hora estimada de llegada (+3 horas)
+    hora_estimada = (hora_despacho + timedelta(hours=3)).strftime('%H:%M')
+    
+    print(f"🚚 Pedido {pedido_id} despachado a las {hora_despacho.strftime('%H:%M')} (Hora Chile)")
+    print(f"⏰ Hora estimada de llegada: {hora_estimada}")
     
     # Cambiar estado a despachado
     pedido.estado = EstadoPedido.despachado
@@ -1265,27 +1256,97 @@ def marcar_pedido_en_camino(
         seguimiento = SeguimientoDB(
             pedido_id=pedido.id,
             estado=EstadoSeguimiento.en_camino,
-            hora_estimada_llegada=(datetime.now(timezone.utc) + timedelta(hours=1)).time().isoformat(),
+            hora_estimada_llegada=hora_estimada,
             repartidor_asignado=current_user.nombre or current_user.email
         )
         db.add(seguimiento)
     else:
         seguimiento.estado = EstadoSeguimiento.en_camino
+        seguimiento.hora_estimada_llegada = hora_estimada
         if not seguimiento.repartidor_asignado:
             seguimiento.repartidor_asignado = current_user.nombre or current_user.email
     
     db.commit()
     db.refresh(pedido)
     
-    print(f"Pedido {pedido_id} marcado como EN CAMINO por {current_user.email}")
+    # ✅ ENVIAR EMAIL AL CLIENTE CON LA NOTIFICACIÓN DE DESPACHO
+    cliente = get_usuario_by_id(db, pedido.usuario_id)
+    if cliente:
+        nombre_cliente = cliente.nombre if cliente.nombre else cliente.email.split('@')[0]
+        repartidor_nombre = current_user.nombre if current_user.nombre else current_user.email.split('@')[0]
+        
+        cuerpo_html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; background-color: #f8f9fa; padding: 20px; margin: 0;">
+            <div style="max-width: 650px; margin: 0 auto; background: white; border-radius: 15px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+                
+                <div style="background: linear-gradient(135deg, #7B3F00, #5a2e00); padding: 40px 30px; text-align: center;">
+                    <div style="background: white; width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+                        <span style="font-size: 60px;">🚚</span>
+                    </div>
+                    <h1 style="color: white; margin: 0; font-size: 32px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">¡Tu Pedido Va en Camino!</h1>
+                </div>
+                
+                <div style="padding: 40px 30px;">
+                    <h2 style="color: #28a745; text-align: center; margin-bottom: 20px;">Pedido #{pedido_id} Despachado</h2>
+                    
+                    <p style="font-size: 16px; color: #333; margin-bottom: 10px;"><strong>Hola {nombre_cliente},</strong></p>
+                    <p style="font-size: 15px; color: #666; line-height: 1.6; margin-bottom: 30px;">
+                        Tu pedido acaba de salir de nuestra tienda y está en camino a tu domicilio.
+                    </p>
+                    
+                    <div style="background: #e7f3ff; border-left: 4px solid #007bff; padding: 20px; margin: 20px 0; border-radius: 8px;">
+                        <h3 style="color: #007bff; margin-top: 0;">🚚 Información de Entrega</h3>
+                        <p style="margin: 5px 0; color: #666;"><strong>📦 Pedido:</strong> #{pedido_id}</p>
+                        <p style="margin: 5px 0; color: #666;"><strong>🏍️ Repartidor:</strong> {repartidor_nombre}</p>
+                        <p style="margin: 5px 0; color: #666;"><strong>⏰ Hora de Salida:</strong> {hora_despacho.strftime('%H:%M')}</p>
+                        <p style="margin: 5px 0; color: #666;"><strong>📍 Dirección:</strong> {cliente.direccion if cliente.direccion else 'Por confirmar'}</p>
+                        <p style="margin: 15px 0 0 0; font-size: 18px; color: #28a745; font-weight: bold;">
+                            🕐 Llegada Estimada: {hora_estimada}
+                        </p>
+                    </div>
+                    
+                    <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 8px;">
+                        <p style="margin: 0; color: #856404;">
+                            <strong>💡 Consejo:</strong> Tu pedido llegará aproximadamente en <strong>3 horas</strong>. 
+                            Te recomendamos estar atento a tu teléfono por si el repartidor necesita contactarte.
+                        </p>
+                    </div>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <p style="font-size: 18px; color: #7B3F00; font-weight: bold;">¡Gracias por tu preferencia!</p>
+                        <p style="color: #666; font-size: 14px;">Pronto estarás disfrutando de tus deliciosos chocolates 🍫</p>
+                    </div>
+                </div>
+                
+                <div style="background: linear-gradient(135deg, #7B3F00, #5a2e00); padding: 25px 30px; text-align: center;">
+                    <p style="margin: 0; color: white; font-size: 14px; font-weight: bold;">CHOCOLATERÍA CHOCOMANIA</p>
+                    <p style="margin: 5px 0; color: #f8f9fa; font-size: 12px;">
+                        📞 Contacto: +56 9 1234 5678 | ✉️ contacto@chocomania.cl
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        await enviar_email_async(
+            asunto=f"🚚 Tu Pedido #{pedido_id} está en Camino - Chocomania",
+            email_destinatario=cliente.email,
+            cuerpo_html=cuerpo_html
+        )
+        
+        print(f"📧 Email de despacho enviado a {cliente.email}")
+    
+    print(f"✅ Pedido {pedido_id} marcado como EN CAMINO por {current_user.email}")
     
     return {
         "mensaje": f"Pedido #{pedido_id} está en camino",
         "estado": "despachado",
-        "pedido_id": pedido_id
+        "pedido_id": pedido_id,
+        "hora_despacho": hora_despacho.strftime('%H:%M'),
+        "hora_estimada_llegada": hora_estimada
     }
-
-# Después del endpoint marcar_pedido_en_camino, agregar:
 
 @app.put("/seguimiento/{pedido_id}/entregar", response_model=dict)
 def marcar_pedido_entregado(
