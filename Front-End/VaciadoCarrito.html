@@ -119,6 +119,42 @@
             background: linear-gradient(135deg, #7B3F00, #A0522D);
             color: white;
         }
+        
+        /* ✅ AGREGAR: Responsividad */
+        @media (max-width: 768px) {
+            .table-choco {
+                font-size: 0.85rem;
+            }
+            
+            .table-choco td, .table-choco th {
+                padding: 8px 5px !important;
+            }
+            
+            .btn-danger-small {
+                font-size: 0.7rem;
+                padding: 5px 10px;
+            }
+            
+            .action-buttons {
+                flex-direction: column !important;
+            }
+        }
+        
+        @media (max-width: 576px) {
+            /* Ocultar precio unitario en móviles pequeños */
+            .table-choco thead th:nth-child(3),
+            .table-choco tbody td:nth-child(3) {
+                display: none;
+            }
+            
+            .choco-logo {
+                font-size: 1.5rem;
+            }
+            
+            .section-title {
+                font-size: 1.5rem;
+            }
+        }
     </style>
 </head>
 <body>

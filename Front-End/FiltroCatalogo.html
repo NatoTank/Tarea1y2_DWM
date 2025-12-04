@@ -229,6 +229,59 @@
       from { transform: translateX(100%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
     }
+    
+    /* ✅ AGREGAR: Hacer sidebar responsive */
+    @media (max-width: 991px) {
+        .sidebar-filters {
+            position: static;
+            margin-bottom: 20px;
+        }
+        
+        .filter-section {
+            padding: 15px;
+        }
+        
+        .product-card {
+            margin-bottom: 15px;
+        }
+    }
+    
+    @media (max-width: 576px) {
+        .choco-logo {
+            font-size: 1.5rem;
+        }
+        
+        .catalog-title {
+            font-size: 1.5rem;
+        }
+        
+        .product-image-container {
+            height: 200px;
+        }
+        
+        .product-title {
+            font-size: 1rem;
+        }
+        
+        .product-price {
+            font-size: 1.1rem;
+        }
+        
+        /* Botones más pequeños */
+        .btn-choco {
+            font-size: 0.9rem;
+            padding: 10px;
+        }
+        
+        /* Filtros en accordion para móviles */
+        .filter-group {
+            margin-bottom: 15px;
+        }
+        
+        .filter-title {
+            font-size: 1rem;
+        }
+    }
   </style>
 </head>
 <body>
@@ -262,7 +315,14 @@
     <div class="row">
       <!-- Sidebar de Filtros -->
       <div class="col-lg-3 col-md-4">
-        <div class="sidebar-filters">
+        <!-- ✅ MODIFICAR: Agregar botón collapse para filtros en móviles -->
+        <div class="d-lg-none mb-3">
+            <button class="btn btn-choco w-100" type="button" data-bs-toggle="collapse" data-bs-target="#mobileFilters">
+                <i class="fas fa-filter me-2"></i>Mostrar Filtros
+            </button>
+        </div>
+        
+        <div class="sidebar-filters collapse d-lg-block" id="mobileFilters">
           <h5 class="filter-title">FILTROS POR TIPO</h5>
           
           <div class="filter-group">

@@ -200,6 +200,49 @@
         .nav-link:hover {
             color: var(--choco-gold);
         }
+
+        /* ✅ AGREGAR: Responsividad para tabla de pedidos */
+        @media (max-width: 768px) {
+            .orders-header h3 {
+                font-size: 1.3rem;
+            }
+            
+            .table-choco {
+                font-size: 0.85rem;
+            }
+            
+            .table-choco td, .table-choco th {
+                padding: 10px 5px !important;
+            }
+            
+            .status-badge {
+                font-size: 0.7rem;
+                padding: 3px 8px;
+            }
+            
+            .action-buttons {
+                flex-direction: column !important;
+                gap: 5px !important;
+            }
+            
+            .btn-danger-small,
+            .btn-primary-small {
+                width: 100%;
+                padding: 8px 12px;
+            }
+        }
+        
+        @media (max-width: 576px) {
+            /* Ocultar fecha en pantallas muy pequeñas */
+            .table-choco thead th:nth-child(2),
+            .table-choco tbody td:nth-child(2) {
+                display: none;
+            }
+            
+            .section-title {
+                font-size: 1.5rem;
+            }
+        }
     </style>
 </head>
 <body>
